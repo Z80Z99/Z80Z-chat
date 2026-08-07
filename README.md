@@ -45,6 +45,16 @@ npm run start      # 构建并启动
 
 防火墙规则自动配置（首次启动弹 UAC 授权），局域网设备可直接访问。
 
+### 单文件部署（NodeChat.bat）
+
+本仓库是完整源码；单文件安装器 `NodeChat.bat` 是构建产物（内含引导层 + 源码 zip）：
+
+```bash
+npm run build:single    # 生成 NodeChat.bat（版本号取自 package.json）
+```
+
+生成的 bat 可直接分发：双击首次运行完成安装（下载 Node.js → npm install → 构建），之后作为启动器使用，支持智能快速更新。
+
 ## Linux 部署
 
 ```bash
