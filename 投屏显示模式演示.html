@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>投屏显示模式演示</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1e1f22;
+            color: #dbdee1;
+            font-family: Arial, sans-serif;
+        }
+        .demo-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .demo-title {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #5865f2;
+        }
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .demo-item {
+            background: #2e3035;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #4a4d55;
+        }
+        .demo-item h3 {
+            margin-top: 0;
+            color: #5865f2;
+            text-align: center;
+        }
+        .video-container {
+            background: #000;
+            border: 2px solid #4a4d55;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            height: 200px;
+            margin-bottom: 15px;
+        }
+        .demo-video {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, #1e1f22 25%, #2e3035 25%, #2e3035 50%, #1e1f22 50%, #1e1f22 75%, #2e3035 75%, #2e3035);
+            background-size: 20px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #5865f2;
+            font-size: 14px;
+            text-align: center;
+        }
+        .demo-video.contain {
+            object-fit: contain;
+        }
+        .demo-video.fill {
+            object-fit: fill;
+        }
+        .demo-video.cover {
+            object-fit: cover;
+        }
+        .demo-description {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #b9bbbe;
+        }
+        .demo-features {
+            margin-top: 10px;
+            padding-left: 20px;
+        }
+        .demo-features li {
+            margin: 5px 0;
+            font-size: 13px;
+        }
+        .demo-features li.positive {
+            color: #43b581;
+        }
+        .demo-features li.negative {
+            color: #f04747;
+        }
+        .demo-features li.neutral {
+            color: #faa61a;
+        }
+        .comparison-table {
+            background: #2e3035;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+        .comparison-table h3 {
+            margin-top: 0;
+            color: #5865f2;
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #4a4d55;
+        }
+        th {
+            background: #1e1f22;
+            color: #5865f2;
+            font-weight: bold;
+        }
+        tr:hover {
+            background: #1e1f22;
+        }
+        .mode-icon {
+            font-size: 20px;
+            margin-right: 10px;
+        }
+        .code {
+            background: #1e1f22;
+            color: #5865f2;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <h1 class="demo-title">投屏显示模式演示</h1>
+        
+        <div class="demo-grid">
+            <div class="demo-item">
+                <h3>📐 保持比例 (object-contain)</h3>
+                <div class="video-container">
+                    <div class="demo-video contain">
+                        <div>
+                            <div>📺 视频内容</div>
+                            <div style="font-size: 12px; margin-top: 10px;">
+                                保持原始比例<br>
+                                完整显示内容<br>
+                                可能有黑边
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="demo-description">
+                    <strong>特点：</strong>保持视频原始宽高比，确保完整显示所有内容
+                    <ul class="demo-features">
+                        <li class="positive">✅ 显示完整视频内容</li>
+                        <li class="positive">✅ 保持原始比例</li>
+                        <li class="negative">❌ 可能有黑边</li>
+                        <li class="neutral">🎯 适用：观看完整内容</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="demo-item">
+                <h3>🔳 填满屏幕 (object-fill)</h3>
+                <div class="video-container">
+                    <div class="demo-video fill">
+                        <div>
+                            <div>📺 视频内容</div>
+                            <div style="font-size: 12px; margin-top: 10px;">
+                                拉伸填满容器<br>
+                                无黑边<br>
+                                可能变形
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="demo-description">
+                    <strong>特点：</strong>拉伸视频填满整个容器，无黑边但可能变形
+                    <ul class="demo-features">
+                        <li class="positive">✅ 无黑边，完全填充</li>
+                        <li class="negative">❌ 可能拉伸变形</li>
+                        <li class="neutral">🎯 适用：全屏观看</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="demo-item">
+                <h3>🖼️ 覆盖屏幕 (object-cover)</h3>
+                <div class="video-container">
+                    <div class="demo-video cover">
+                        <div>
+                            <div>📺 视频内容</div>
+                            <div style="font-size: 12px; margin-top: 10px;">
+                                保持比例<br>
+                                裁剪多余部分<br>
+                                无黑边
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="demo-description">
+                    <strong>特点：</strong>保持比例，裁剪多余部分，无黑边但可能裁剪内容
+                    <ul class="demo-features">
+                        <li class="positive">✅ 无黑边，保持比例</li>
+                        <li class="negative">❌ 可能裁剪部分内容</li>
+                        <li class="neutral">🎯 适用：最大化显示</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="comparison-table">
+            <h3>📊 对比表</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>显示模式</th>
+                        <th>CSS 属性</th>
+                        <th>保持比例</th>
+                        <th>完整显示</th>
+                        <th>无黑边</th>
+                        <th>推荐场景</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="mode-icon">📐</span>保持比例</td>
+                        <td><span class="code">object-contain</span></td>
+                        <td>✅</td>
+                        <td>✅</td>
+                        <td>❌</td>
+                        <td>观看完整内容</td>
+                    </tr>
+                    <tr>
+                        <td><span class="mode-icon">🔳</span>填满屏幕</td>
+                        <td><span class="code">object-fill</span></td>
+                        <td>❌</td>
+                        <td>✅</td>
+                        <td>✅</td>
+                        <td>全屏观看</td>
+                    </tr>
+                    <tr>
+                        <td><span class="mode-icon">🖼️</span>覆盖屏幕</td>
+                        <td><span class="code">object-cover</span></td>
+                        <td>✅</td>
+                        <td>❌</td>
+                        <td>✅</td>
+                        <td>最大化显示</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="demo-item" style="margin-top: 30px;">
+            <h3>使用建议</h3>
+            <div class="demo-description">
+                <strong>正常观看：</strong>使用"保持比例"模式，显示完整内容
+                <br><br>
+                <strong>全屏观看：</strong>使用"填满屏幕"模式，画面铺满屏幕
+                <br><br>
+                <strong>移动设备：</strong>"覆盖屏幕"模式在手机上效果更好
+                <br><br>
+                <strong>游戏投屏：</strong>建议使用"填满屏幕"模式
+                <br><br>
+                <strong>会议投屏：</strong>建议使用"保持比例"模式，显示所有内容
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 添加一些交互效果
+        document.addEventListener('DOMContentLoaded', () => {
+            const demoVideos = document.querySelectorAll('.demo-video');
+            
+            demoVideos.forEach(video => {
+                video.addEventListener('click', () => {
+                    // 添加点击效果
+                    video.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        video.style.transform = 'scale(1)';
+                    }, 150);
+                });
+            });
+
+            console.log('投屏显示模式演示页面已加载');
+            console.log('点击视频块查看交互效果');
+        });
+    </script>
+</body>
+</html>

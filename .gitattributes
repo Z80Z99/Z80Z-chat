@@ -1,0 +1,8 @@
+# 统一 LF 行尾（.bat 构建产物除外——cmd 需要 CRLF 的场景由构建脚本处理）
+* text=auto eol=lf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary

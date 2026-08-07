@@ -1,0 +1,75 @@
+# NodeChat systemd 服务模板（Linux 长期运行）
+# 使用方式见下方注释，或 docs/DEPLOYMENT.md
+#
+# 安装步骤（以 /opt/nodechat 为例）：
+#   1. 部署代码：sudo mkdir -p /opt/nodechat && sudo cp -r . /opt/nodechat
+#   2. 安装依赖并构建前端：
+#        cd /opt/nodechat && npm install --omit=dev && npm run build
+#   3. 创建独立运行用户（无登录权限）：
+#        sudo useradd --system --home /opt/nodechat --shell /usr/sbin/nologin nodechat
+#   4. 数据目录权限（UMask 仅影响新建文件，已存在的目录需手动设置）：
+#        sudo mkdir -p /opt/nodechat/data /opt/nodechat/logs
+#        sudo chown -R nodechat:nodechat /opt/nodechat/data /opt/nodechat/logs
+#        sudo chmod 700 /opt/nodechat/data /opt/nodechat/logs
+#   5. 安装服务：
+#        sudo cp deploy/nodechat.service /etc/systemd/system/
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now nodechat
+#   6. 常用命令：
+#        systemctl status nodechat        # 查看状态
+#        journalctl -u nodechat -f        # 查看日志
+#        sudo systemctl restart nodechat  # 重启
+
+[Unit]
+Description=NodeChat - Discord-style Community Chat
+# 等待网络就绪后再启动（监听 0.0.0.0 需要网络栈）
+After=network.target
+
+[Service]
+Type=simple
+
+# 独立低权限用户运行（需按上方步骤 3 预先创建）
+User=nodechat
+Group=nodechat
+
+# 项目根目录（dist/、config.json、node_modules 均在此）
+WorkingDirectory=/opt/nodechat
+
+# 启动命令：直接运行 server.js（端口由 Environment 传入）
+# 提示：如 node 不在 /usr/bin/env 的 PATH 中，请改为 node 实际绝对路径
+ExecStart=/usr/bin/env node /opt/nodechat/server.js
+
+# 异常退出自动重启，3 秒后重试
+Restart=on-failure
+RestartSec=3
+
+# 环境变量（示例；也可用 EnvironmentFile=/etc/nodechat.env 集中管理）
+Environment=PORT=3000
+Environment=DATA_DIR=/opt/nodechat/data
+Environment=LOG_DIR=/opt/nodechat/logs
+
+# 数据目录默认权限 700（仅运行用户可读，保护 db.json 中的密码哈希）
+# 注意：仅影响服务创建的新文件/目录，已存在目录需手动 chmod/chown（见上方步骤 4）
+UMask=0077
+
+# ---- 安全加固（systemd 硬化）----
+# 禁止提升权限
+NoNewPrivileges=true
+# 独立临时目录
+PrivateTmp=true
+# 系统目录只读（/usr /boot /etc），/opt/nodechat 不受影响可正常读写
+ProtectSystem=full
+# 隔离 /home 访问
+ProtectHome=true
+# 禁止 setuid/setgid 位
+RestrictSUIDSGID=true
+
+# ---- 日志 ----
+# 输出到 journald（journalctl -u nodechat -f），logger 模块仍会写 LOG_DIR/app.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nodechat
+
+[Install]
+# 开机自启（systemctl enable 时生效）
+WantedBy=multi-user.target

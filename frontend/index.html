@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e1f22" />
+  <title>NodeChat - Discord-style Community Chat</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%235865f2'/%3E%3Ctext x='50' y='68' font-size='48' fill='white' text-anchor='middle' font-family='Arial'%3ENC%3C/text%3E%3C/svg%3E" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #app { height: 100%; width: 100%; overflow: hidden; }
+    /* 仅保留 FOUC 防闪烁背景，滚动条等样式已统一迁移至 src/style.css */
+    body { font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; background: #1e1f22; color: #dbdee1; }
+  </style>
+</head>
+<body class="dark">
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

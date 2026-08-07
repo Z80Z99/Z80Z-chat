@@ -1,0 +1,264 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#1e1f22] text-[#dbdee1] overflow-hidden;
+    /* CJK 字体优先（PingFang/YaHei 在 Segoe 前，避免 Windows 基线偏移） */
+    font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: rgba(88, 101, 242, 0.4);
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid #5865f2;
+    outline-offset: 2px;
+  }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* 滚动条统一（从 index.html 内联迁移，Firefox + WebKit 双支持） */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1a1b1e transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1a1b1e;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2e3035;
+  }
+  :fullscreen {
+    width: 100%;
+    height: 100%;
+    background: #000;
+  }
+  :-webkit-full-screen {
+    width: 100%;
+    height: 100%;
+    background: #000;
+  }
+}
+
+@layer components {
+  /* ────────── 动画关键帧 ────────── */
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes message-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes orb-drift {
+    from { transform: translate(0, 0) scale(1); }
+    to { transform: translate(30px, 20px) scale(1.1); }
+  }
+  .animate-fade-in-up { animation: fade-in-up 200ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-scale-in { animation: scale-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-message-in { animation: message-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+  /* ────────── 登录/注册页 ────────── */
+  .auth-bg {
+    position: relative;
+    overflow: hidden;
+  }
+  .auth-bg::before,
+  .auth-bg::after {
+    content: '';
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(70px);
+    mix-blend-mode: screen;
+    pointer-events: none;
+  }
+  .auth-bg::before {
+    width: 480px;
+    height: 480px;
+    left: -140px;
+    top: -140px;
+    background: rgba(88, 101, 242, 0.55);
+    animation: orb-drift 11s ease-in-out infinite alternate;
+  }
+  .auth-bg::after {
+    width: 420px;
+    height: 420px;
+    right: -120px;
+    bottom: -120px;
+    background: rgba(88, 101, 242, 0.32);
+    animation: orb-drift 9s ease-in-out infinite alternate-reverse;
+  }
+  .auth-card {
+    @apply relative bg-discord-800/95 backdrop-blur border border-discord-600/60 rounded-2xl p-6 sm:p-8 w-full max-w-md;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04), 0 0 80px rgba(88, 101, 242, 0.08);
+    animation: scale-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .auth-input-wrap {
+    @apply relative;
+  }
+  .auth-input-icon {
+    @apply absolute left-3 top-1/2 -translate-y-1/2 text-discord-300 w-5 h-5 pointer-events-none;
+  }
+  .btn-gradient {
+    @apply text-white px-4 py-2 rounded font-medium transition-all duration-150 text-sm active:scale-[.98];
+    background: linear-gradient(135deg, #5865f2, #7b7ff2);
+    box-shadow: 0 4px 14px rgba(88, 101, 242, 0.3);
+  }
+  .btn-gradient:hover {
+    filter: brightness(1.1);
+  }
+
+  /* ────────── 弹窗 / 菜单动效 ────────── */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/70 backdrop-blur-[2px] flex items-center justify-center z-50;
+    animation: fade-in 150ms ease-out both;
+  }
+  .modal-content {
+    @apply bg-discord-800 rounded-lg p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto;
+    animation: scale-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .context-menu {
+    @apply bg-discord-600 rounded-lg py-1 shadow-xl min-w-[180px] z-50 border border-black/20;
+    animation: scale-in 120ms ease-out both;
+    transform-origin: top right;
+  }
+  .context-item {
+    @apply px-3 py-2 text-sm text-discord-100 hover:bg-discord-500 cursor-pointer
+           transition-colors duration-100 flex items-center gap-2;
+  }
+  .context-item.danger {
+    @apply text-red hover:bg-red/20;
+  }
+
+  /* ────────── 服务器栏（Discord 风格指示条） ────────── */
+  .sidebar-item {
+    @apply relative w-12 h-12 rounded-2xl bg-discord-700 hover:bg-blurple 
+           flex items-center justify-center cursor-pointer
+           transition-all duration-150 text-white text-lg font-semibold
+           hover:rounded-xl;
+  }
+  .sidebar-item::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    width: 4px;
+    height: 0;
+    border-radius: 0 4px 4px 0;
+    background: #fff;
+    transform: translateY(-50%);
+    transition: height 150ms ease-out;
+  }
+  .sidebar-item:hover::before { height: 20px; }
+  .sidebar-item.active::before { height: 36px; }
+  .sidebar-item.active {
+    @apply bg-blurple rounded-xl;
+  }
+  .sidebar-item.dm {
+    @apply bg-discord-700 hover:bg-green hover:rounded-xl;
+  }
+  .sidebar-item.dm.active {
+    @apply bg-green rounded-xl;
+  }
+
+  /* ────────── 频道 / 成员列表 ────────── */
+  .channel-item {
+    @apply flex items-center px-2 py-1.5 mx-2 rounded cursor-pointer
+           text-discord-200 hover:text-discord-50 hover:bg-discord-500/60
+           transition-colors duration-100 text-sm font-medium;
+  }
+  .channel-item.active {
+    @apply bg-discord-500 text-white;
+  }
+  .channel-item.voice {
+    @apply text-discord-200;
+  }
+  .channel-item.voice.active {
+    @apply bg-green/20 text-green;
+  }
+  .member-item {
+    @apply flex items-center gap-2 px-2 py-1.5 mx-1 rounded cursor-pointer
+           hover:bg-discord-500/60 transition-colors duration-100;
+  }
+
+  /* ────────── 按钮 ────────── */
+  .btn-primary {
+    @apply bg-blurple hover:bg-blurple-hover text-white px-4 py-2 
+           rounded font-medium transition-all duration-150 text-sm active:scale-[.98];
+  }
+  .btn-green {
+    @apply bg-green hover:bg-green-hover text-white px-4 py-2 
+           rounded font-medium transition-all duration-150 text-sm active:scale-[.98];
+  }
+  .btn-red {
+    @apply bg-red hover:bg-red-hover text-white px-4 py-2 
+           rounded font-medium transition-all duration-150 text-sm active:scale-[.98];
+  }
+  .btn-ghost {
+    @apply hover:bg-discord-500 text-discord-200 hover:text-white px-3 py-1.5 
+           rounded transition-colors duration-150 text-sm;
+  }
+
+  /* ────────── 输入框 ────────── */
+  .input-discord {
+    @apply bg-discord-900 border border-discord-600 rounded text-sm
+           px-3 py-2 text-white placeholder-discord-300
+           focus:outline-none focus:border-blurple transition-all duration-150
+           focus:ring-2 focus:ring-blurple/30;
+  }
+
+  /* ────────── 消息行 ────────── */
+  .message-row {
+    animation: message-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* ────────── 移动端 ────────── */
+  .mobile-nav-item {
+    @apply w-10 h-10 rounded-full flex-shrink-0 bg-discord-600 text-discord-200
+           flex items-center justify-center cursor-pointer transition-all duration-150
+           active:scale-90;
+  }
+  .mobile-nav-item.active {
+    @apply bg-blurple text-white;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ────────── 无障碍：减弱动态效果 ────────── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
