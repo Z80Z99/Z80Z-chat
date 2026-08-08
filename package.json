@@ -1,6 +1,6 @@
 {
   "name": "z80z-chat",
-  "version": "1.0.29",
+  "version": "1.0.0",
   "description": "Discord-style community chat app - 100% local, zero external dependencies",
   "type": "module",
   "scripts": {
