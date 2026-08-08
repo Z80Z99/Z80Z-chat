@@ -31,7 +31,7 @@ npm run build      # 构建前端（输出到 dist/）
 npm run start      # 构建并启动
 ```
 
-启动后访问 `http://localhost:3000`，注册账号即可创建服务器。
+启动后访问 `http://localhost:配置端口号`，注册账号即可创建服务器。
 
 ## Windows 使用方式
 
