@@ -75,7 +75,7 @@ z80z-chat/
 - `ScreenShareVideo.vue`：状态机（waiting/loading/playing/black/error），黑屏检测自动触发 refresh；控制条仅保留 播放/暂停 + 全屏（用户要求精简）
 - 新增 WS 事件必须同步加进 websocket/index.js 的白名单 relay case
 
-## 隧道管理（v1.0.22 Cloudflare Tunnel 新增，v1.0.24 扩展 SakuraFRP）
+## 隧道管理（Cloudflare Tunnel / SakuraFRP）
 
 「隧道管理」主入口现在是**服务选择页**（start.js `tunnelMenu()`）：`1. Cloudflare Tunnel`（进 `cfMenu()`）/ `2. SakuraFRP`（进 `sfpMenu()`）。
 
@@ -91,7 +91,7 @@ z80z-chat/
 - 公网可达检测：启动后 fetch `https://<hostname>/api/config`（30 秒超时轮询）
 - 注意：隧道进程与 Z80Z-chat 服务相互独立，停止服务不会停隧道（反之亦然）；未登录/未创建隧道时启动会给出明确提示
 
-### SakuraFRP（sfp* 函数族，v1.0.24 新增）
+### SakuraFRP（sfp* 函数族）
 
 - frpc 下载链接为**面板账号专属**（https://www.natfrp.com/user/ → 软件下载），无法硬编码公开 URL，向导引导用户粘贴
 - 关键文件（均在 `sakurafrp/` 下）：`frpc.exe`、`frpc.ini`（TUI 交互模式生成）、`.sakurafrp.pid`、`settings.json`、`frpc.log`
@@ -101,7 +101,7 @@ z80z-chat/
 - 交互模式配置：`spawnSync(exe, [], {cwd: SFP_DIR, stdio: 'inherit'})` 运行 TUI（输入 Token → 勾选隧道 → Ctrl-C 生成 frpc.ini）
 - 免费额度：2 隧道 / 10Mbps / 5GiB 每月（签到可领），语音投屏走 WebRTC 不占流量
 
-## 智能快速更新（v1.0.24 新增）
+## 智能快速更新（智能快速更新）
 
 - 构建时（build-single.js `computePayloadSha`）计算**内容指纹**：zip 条目剔除 package.json，按相对路径排序后逐文件 sha256 → 整体 sha256，注入 bat 头部 `PAYLOAD_SHA`（cmd 层 → PS param `$PayloadSha`）
 - 安装端判定（install.template.bat `Update()`）：解压 zip 到临时目录 → `Compute-PayloadSha` 与 PAYLOAD_SHA 比较 → 与 `.install-version` 记录的 payloadHash 比较 → `Get-DepsKey`（dependencies+devDependencies，**排除 version**）比较 → node_modules/dist 存在
@@ -109,7 +109,7 @@ z80z-chat/
 - 指纹算法必须与构建端一致：相对路径用 `/`、Ordinal 排序、UTF-8 文件名、内容逐文件 sha256
 - 修改 build-single.js 的打包/指纹逻辑时，必须同步改 install.template.bat 的 `Compute-PayloadSha` 与 `Get-DepsKey`
 
-## 上传文件访问签名（v1.0.27 新增）
+## 上传文件访问签名（上传签名访问）
 
 - `/uploads/*` 无鉴权静态托管已移除，改为 HMAC 签名访问（`utils/uploadSign.js`）：URL 需带 `?expires=&sig=`，无签名/篡改/过期一律 403
 - 签名出口：REST 响应经 `server.js` 的 `res.json` 包装中间件自动签名；WS 出口在 `utils/message.js` broadcast 与 `websocket/push.js` 签名；`signUploadUrlsDeep` 深度遍历只改 `/uploads/` 字符串，已签名 URL 跳过
@@ -117,7 +117,7 @@ z80z-chat/
 - 新增配置：`uploadUrlExpiresSec`（默认 604800=7 天）、`uploadSecret`（留空自动生成持久化 `data/.upload-secret`）
 - 修改签名逻辑时保持 `signUploadPath`/`verifyUploadSig` 双向一致（HMAC-SHA256 于 `url.expires`，恒定时间比较）
 
-## 前端样式约定（v1.0.28 美术优化）
+## 前端样式约定（美术优化）
 
 - 全局样式统一在 `frontend/src/style.css`：基础层（CJK 字体栈、`::selection`、`:focus-visible` 焦点环、滚动条、tap-highlight）、组件层（关键帧 `fade-in-up`/`scale-in`/`message-in`/`fade-in`/`orb-drift` + `.animate-*` 工具类、auth 页 `.auth-bg`/`.auth-card`/`.auth-input-wrap`/`.btn-gradient`、弹窗/菜单动画、`.sidebar-item::before` 指示条、`.message-row` 动画、移动端按压反馈）
 - 登录/注册页用 `.auth-bg`（氛围光晕）+ `.auth-card`（描边/阴影）+ `.btn-gradient`（渐变按钮）+ `.animate-fade-in-up`（交错进入动画）
@@ -127,7 +127,7 @@ z80z-chat/
 
 ## 项目清档
 
-主菜单「项目清档」会删除 db.json、uploads、server.pid，需输入 YES 确认；服务运行中会先停止。重启服务后自动重建空数据。备份数据 = 复制整个 data 目录。v1.0.25 起清档同时停止运行中的隧道并删除隧道配置（cloudflared/ 的 settings.json、config.yml、.cloudflared.pid；sakurafrp/ 的 settings.json、frpc.ini、.sakurafrp.pid、frpc.log），程序本体（exe）保留。
+主菜单「项目清档」会删除 db.json、uploads、server.pid，需输入 YES 确认；服务运行中会先停止。重启服务后自动重建空数据。备份数据 = 复制整个 data 目录。清档同时停止运行中的隧道并删除隧道配置（cloudflared/ 的 settings.json、config.yml、.cloudflared.pid；sakurafrp/ 的 settings.json、frpc.ini、.sakurafrp.pid、frpc.log），程序本体（exe）保留。
 
 ## 当前状态（上次会话结束时）
 

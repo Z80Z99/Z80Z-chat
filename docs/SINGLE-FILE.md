@@ -53,14 +53,14 @@ Node.js 下载、依赖安装、前端构建、启动服务全流程，适合分
 - 主菜单「备份管理」：立即备份 / 查看 / 恢复 / 清理，备份存于外层 `data-backup/`
 - 更新流程自动备份，保留份数由 `config.json` 的 `backupKeep` 控制
 
-## 公网访问（隧道管理，v1.0.22+ / v1.0.24 扩展）
+## 公网访问（隧道管理）
 
 - 无公网 IP 也能对外访问：主菜单「隧道管理」→ 选择服务（Cloudflare Tunnel / SakuraFRP）
 - **Cloudflare Tunnel**：`https://chat.z80z99.cn`（需将域名 NS 接入 Cloudflare），cloudflared 按需下载到外层 `cloudflared/` 目录（下载前测速选择线路）
 - **SakuraFRP（国内低延迟）**：需 natfrp.com 账号（免费 2 隧道 / 10Mbps / 5GiB 每月），frpc 下载链接从面板「软件下载」复制粘贴，隧道在面板创建（本地 IP 127.0.0.1，端口 = Z80Z-chat 端口），连接方式支持交互（frpc TUI）与命令行（`-f 密钥:隧道ID`）两种
 - 两者均为后台运行 + PID 记录，互不影响，与 Z80Z-chat 服务独立
 
-## 智能快速更新（v1.0.24+）
+## 智能快速更新
 
 - 更新时自动比对内容指纹：仅启动器（start.js/引导层）变化时跳过备份与 npm install/build，秒完成更新
 - 源码/依赖变化时自动走完整更新（备份 → 重建 → 安装依赖 → 构建）
