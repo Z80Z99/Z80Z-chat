@@ -1,4 +1,4 @@
-# NodeChat 数据备份与恢复
+# Z80Z-chat 数据备份与恢复
 
 ## 1. 数据组成
 
@@ -39,10 +39,10 @@ node scripts/restore.js
 **重要：恢复前先停止服务**：
 
 ```bash
-sudo systemctl stop nodechat        # Linux systemd
+sudo systemctl stop z80z-chat        # Linux systemd
 # 或 Windows start.bat → 停止服务
 node scripts/restore.js
-sudo systemctl start nodechat
+sudo systemctl start z80z-chat
 ```
 
 > 原因：服务在内存中持有数据库快照，运行中恢复会被下一次写入覆盖；同时避免并发读写。
@@ -62,7 +62,7 @@ data/
 
 - **手动备份为主**：升级 / 清档 / 大操作前执行一次
 - 可选：启动时每日首次自动备份（记录"上次备份日期"，同日不重复）
-- Linux 环境可用 cron：`0 3 * * * cd /opt/nodechat && npm run backup`
+- Linux 环境可用 cron：`0 3 * * * cd /opt/z80z-chat && npm run backup`
 - 保留策略建议：定期清理过旧备份（如保留最近 30 份），脚本按文件名时间戳排序即可
 
 ## 6. 数据迁移（换机 / 换目录）
@@ -71,11 +71,11 @@ data/
 
 ```bash
 # 旧机器
-tar -czf nodechat-data.tar.gz data/
+tar -czf z80z-chat-data.tar.gz data/
 
 # 新机器：解压到新 DATA_DIR 指向的目录
-tar -xzf nodechat-data.tar.gz -C /opt/nodechat/
-sudo chown -R nodechat:nodechat /opt/nodechat/data
+tar -xzf z80z-chat-data.tar.gz -C /opt/z80z-chat/
+sudo chown -R z80z-chat:z80z-chat /opt/z80z-chat/data
 ```
 
 方式二：仅迁移数据库 + 上传文件

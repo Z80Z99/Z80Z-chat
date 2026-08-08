@@ -203,7 +203,7 @@ function getProcessName(pid) {
 }
 
 // 写临时 ps1 并以管理员提权执行（UAC 弹窗），返回是否执行成功；拒绝授权/失败返回 false
-function runElevatedPs1(scriptLines, prefix = 'nodechat-fw') {
+function runElevatedPs1(scriptLines, prefix = 'z80z-chat-fw') {
   const tmpScript = path.join(os.tmpdir(), `${prefix}-${Date.now()}.ps1`)
   fs.writeFileSync(tmpScript, scriptLines.join('\n'), 'utf-8')
   try {
@@ -220,7 +220,7 @@ function runElevatedPs1(scriptLines, prefix = 'nodechat-fw') {
 }
 
 function applyFirewall(port, ruleName) {
-  const legacyRuleNames = ['NodeChat3000', 'NodeChat'].filter(n => n !== ruleName)
+  const legacyRuleNames = ['Z80Z-chat3000', 'Z80Z-chat', 'NodeChat3000', 'NodeChat'].filter(n => n !== ruleName)
   const script = [
     `$ErrorActionPreference = 'SilentlyContinue'`,
     `netsh advfirewall firewall delete rule name='${ruleName.replace(/'/g, "''")}'`,
@@ -259,7 +259,7 @@ function removeFirewall(ruleName) {
     `netsh advfirewall firewall delete rule name='${ruleName.replace(/'/g, "''")}'`,
     `exit 0`
   ]
-  if (runElevatedPs1(script, 'nodechat-fw-del')) {
+  if (runElevatedPs1(script, 'z80z-chat-fw-del')) {
     log(ok(`防火墙规则「${ruleName}」已删除 · TCP 入站已关闭`))
     return true
   }
@@ -410,7 +410,7 @@ function checkServiceStatus() {
     }
   }
 
-  // 端口被占用但不是 NodeChat 服务
+  // 端口被占用但不是 Z80Z-chat 服务
   result.status = 'conflict'
   result.pid = Number(portPids[0]) || null
   result.message = `端口 ${config.port} 被其他进程占用（PID: ${portPids[0]}）`
@@ -419,13 +419,13 @@ function checkServiceStatus() {
 
 /* ────────────────────────── 单文件模式工具 ────────────────────────── */
 
-// 外层目录（NodeChat.bat 所在层，与 nodejs/、data-backup/ 平级）
+// 外层目录（Z80Z-chat.bat 所在层，与 nodejs/、data-backup/ 平级）
 const outerRoot = path.join(projectRoot, '..')
 const OUTER_BACKUP = path.join(outerRoot, 'data-backup')
 
-// 单文件模式判定：外层存在 NodeChat.bat
+// 单文件模式判定：外层存在 Z80Z-chat.bat
 function isSingleFileMode() {
-  return fs.existsSync(path.join(outerRoot, 'NodeChat.bat'))
+  return fs.existsSync(path.join(outerRoot, 'Z80Z-chat.bat'))
 }
 
 // 首次部署判定：有 .install-version（单文件已装）→ 非首次；
@@ -611,8 +611,8 @@ async function showFirstInstallAdvice() {
 // 检测外层目录是否有无关文件（仅单文件模式启用）
 function outerHasOtherFiles() {
   const ignore = new Set([
-    'nodejs', 'data-backup', '.nodechat-bootstrap.ps1',
-    path.basename(projectRoot), 'NodeChat.bat', 'start.bat', 'install.bat'
+    'nodejs', 'data-backup', '.z80z-chat-bootstrap.ps1',
+    path.basename(projectRoot), 'Z80Z-chat.bat', 'start.bat', 'install.bat'
   ])
   try {
     return fs.readdirSync(outerRoot).some(item => !ignore.has(item))
@@ -1319,7 +1319,7 @@ function listInstalledProjects() {
 
 // 写外层 bat 偏好（等长 PAD，与引导层 Set-BatPreferenceSafe 的 64 基准一致）
 function setBatPreference(key, value) {
-  const batPath = path.join(outerRoot, 'NodeChat.bat')
+  const batPath = path.join(outerRoot, 'Z80Z-chat.bat')
   if (!fs.existsSync(batPath)) return false
   try {
     const lines = fs.readFileSync(batPath, 'utf8').split(/\r?\n/)
@@ -1357,7 +1357,7 @@ async function switchVersion() {
   cls()
   header('切换版本', '在外层已安装的版本之间选择')
   if (!isSingleFileMode()) {
-    log(dim('仅单文件部署模式（外层存在 NodeChat.bat）支持切换版本'))
+    log(dim('仅单文件部署模式（外层存在 Z80Z-chat.bat）支持切换版本'))
     await waitKey()
     return
   }
@@ -1411,9 +1411,9 @@ async function switchVersion() {
   console.log('')
   if (setBatPreference('LAST_PROJECT', target.name)) {
     log(ok(`已切换到：${target.name}`))
-    log(dim('请关闭本窗口，重新运行 NodeChat.bat 进入该版本'))
+    log(dim('请关闭本窗口，重新运行 Z80Z-chat.bat 进入该版本'))
   } else {
-    log(bad('写入外层 NodeChat.bat 偏好失败，切换未生效'))
+    log(bad('写入外层 Z80Z-chat.bat 偏好失败，切换未生效'))
     log(dim('请通过引导层「版本选择」切换'))
   }
   await waitKey()
@@ -1429,7 +1429,7 @@ const CF_EXE = path.join(CF_DIR, 'cloudflared.exe')
 const CF_PID_FILE = path.join(CF_DIR, '.cloudflared.pid')
 const CF_SETTINGS_FILE = path.join(CF_DIR, 'settings.json')
 const CF_CONFIG_FILE = path.join(CF_DIR, 'config.yml')
-const CF_TUNNEL_NAME = 'nodechat'
+const CF_TUNNEL_NAME = 'z80z-chat'
 const CF_DEFAULT_HOSTNAME = 'chat.z80z99.cn'
 // cloudflared 下载源（测速选择，镜像 Node.js 的网络线路选择）
 const CF_SOURCES = [
@@ -1711,7 +1711,7 @@ async function cfInstallMenu() {
   for (const t of [
     '  它是 Cloudflare Tunnel 的客户端，用于把本机服务安全地暴露到公网，',
     '  无需公网 IP、无需路由器端口映射。',
-    '  它用于：将 NodeChat 通过域名 https://chat.z80z99.cn 对外访问。',
+    '  它用于：将 Z80Z-chat 通过域名 https://chat.z80z99.cn 对外访问。',
     '  cloudflared 将安装到当前文件夹内的 cloudflared/ 目录，',
     '  不影响系统其他程序。'
   ]) log(dim(t))
@@ -2114,7 +2114,7 @@ async function sfpWizard() {
     '填写建议：',
     '  · 类型：HTTP / HTTPS（WebSocket 兼容）',
     '  · 本地 IP：127.0.0.1',
-    '  · 本地端口：' + config.port + '（NodeChat 当前端口）',
+    '  · 本地端口：' + config.port + '（Z80Z-chat 当前端口）',
     '  · 节点：就近选择延迟较低的节点'
   ]) log(dim(t))
   console.log('')
@@ -2399,7 +2399,7 @@ async function main() {
   // 首次部署：进入首次部署菜单（依赖缺失时）
   const deployCheck = isFirstDeploy()
   if (deployCheck.isFirst) {
-    // 单文件模式（外层有 NodeChat.bat）检测外层目录纯净度；
+    // 单文件模式（外层有 Z80Z-chat.bat）检测外层目录纯净度；
     // "直接使用现有目录"进入时用户已明确目录用途，跳过建议
     if (isSingleFileMode() && !DIRECT_USE && outerHasOtherFiles()) {
       cls()

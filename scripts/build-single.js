@@ -1,8 +1,8 @@
 // ============================================================
-// NodeChat - 单文件构建脚本
-// 用途：将 start.js + 项目源码打包生成单文件 NodeChat.bat
+// Z80Z-chat - 单文件构建脚本
+// 用途：将 start.js + 项目源码打包生成单文件 Z80Z-chat.bat
 // 用法：npm run build:single
-// 输出：项目根 NodeChat.bat（含引导层 + 内嵌 start.js + 内嵌项目 zip base64）
+// 输出：项目根 Z80Z-chat.bat（含引导层 + 内嵌 start.js + 内嵌项目 zip base64）
 // ============================================================
 import fs from 'fs'
 import path from 'path'
@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename)
 const projectRoot = path.join(__dirname, '..')
 
 const TEMPLATE = path.join(projectRoot, 'deploy', 'install.template.bat')
-const OUTPUT = path.join(projectRoot, 'NodeChat.bat')
+const OUTPUT = path.join(projectRoot, 'Z80Z-chat.bat')
 
 // 打包排除清单（相对项目根，目录按名前缀匹配）
 const EXCLUDE_DIRS = new Set([
@@ -27,12 +27,12 @@ const EXCLUDE_DIRS = new Set([
 const EXCLUDE_FILES = new Set([
   'start.js',          // 单独内嵌到模板，不打包
   'start.bat',         // 单文件模式不需要旧启动器
-  'NodeChat.bat',      // 构建产物自身
-  'NodeChat-DEMO.bat', // 演示版构建产物
+  'Z80Z-chat.bat',      // 构建产物自身
+  'Z80Z-chat-DEMO.bat', // 演示版构建产物
   'package-lock.json', // 锁文件由引导层 npm install 时重新生成
   '.install-version'   // 安装标记由引导层安装/更新时写入
 ])
-// deploy/ 内排除模板自身（保留 nodechat.service 等）
+// deploy/ 内排除模板自身（保留 z80z-chat.service 等）
 const EXCLUDE_DEPLOY = new Set(['install.template.bat'])
 
 function collectFiles(dir, rel = '') {
@@ -140,7 +140,7 @@ function buildProjectZip() {
   // Windows 优先用系统 Compress-Archive（体积小），失败回退手写 stored zip
   if (os.platform() === 'win32') {
     try {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nodechat-pack-'))
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'z80z-chat-pack-'))
       for (const e of entries) {
         const dest = path.join(tmp, e.name)
         fs.mkdirSync(path.dirname(dest), { recursive: true })
@@ -194,7 +194,7 @@ function main() {
   }
 
   console.log('')
-  console.log('  NodeChat 单文件构建')
+  console.log('  Z80Z-chat 单文件构建')
   console.log(`  版本: ${version}`)
   console.log('')
 

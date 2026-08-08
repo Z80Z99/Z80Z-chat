@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename)
 const CONFIG_PATH = path.join(__dirname, '..', 'config.json')
 
 const defaults = {
-  siteName: 'NodeChat',
+  siteName: 'Z80Z-chat',
   port: 3000,
   host: '0.0.0.0',
   dataDir: 'data',
@@ -20,7 +20,7 @@ const defaults = {
   corsOrigins: '*',
   wsPath: '/ws',
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-  firewall: { enabled: true, ruleName: 'NodeChat' },
+  firewall: { enabled: true, ruleName: 'Z80Z-chat' },
   backupKeep: 3,
   uploadUrlExpiresSec: 604800,
   uploadSecret: '',

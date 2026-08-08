@@ -1,4 +1,4 @@
-# AGENTS.md — NodeChat 项目工作说明
+# AGENTS.md — Z80Z-chat 项目工作说明
 
 本文件是给 opencode / AI 助手的工作上下文。每次开始修改本项目前先读本文件。
 
@@ -19,7 +19,7 @@
 ## 目录结构
 
 ```
-nodechat/
+z80z-chat/
 ├── start.bat          # 启动器（必须纯 ASCII，见下方编码坑）
 ├── start.js           # 交互式部署管理脚本（主入口，现代 UI）
 ├── server.js          # Express 服务器（端口/防火墙由 start.js 管理）
@@ -56,7 +56,7 @@ nodechat/
   - 部署后：运行中菜单（1 转入后台静默运行 / 2 停止服务返回主菜单）；直接关窗=停止服务
 - UI 风格约定（后续改动必须保持）：`header()` 为「标题 + accent 全宽分隔线」简洁样式（用户明确要求不要用 ╭─╮ 方框）；菜单项 `N. 标签 · 灰色说明`（无 ▸）；危险项用红色 dangerItem；退出/取消/返回统一用 0；提示 `> `；次要信息用 dim；waitKey 返回提示 `[ 按回车返回 ]`；ANSI 256 色，非 TTY 或 `--no-color` 自动降级
 - 关键参数：`--no-firewall` 跳过防火墙（自动化测试必须加，UAC 授权弹窗会卡住/杀掉工具会话）；`--no-color` 关颜色
-- 防火墙：临时 ps1 + UAC 提权，规则名来自 config.firewall.ruleName（当前 "NodeChat"）；拒绝授权时只警告不中断
+- 防火墙：临时 ps1 + UAC 提权，规则名来自 config.firewall.ruleName（当前 "Z80Z-chat"）；拒绝授权时只警告不中断
 - 后台运行：PID 写入 `data/server.pid`；停止服务优先按 PID 文件杀，失败按端口 netstat 兜底
 
 ## Windows 环境坑（重要）
@@ -87,9 +87,9 @@ nodechat/
 - `settings.json`：`{ tunnelId, hostname }`，hostname 默认 `chat.z80z99.cn`，可改此文件自定义域名
 - 隧道 ID 获取顺序：settings 缓存 → `tunnel list` 正则解析 → `tunnel info` 解析 → 创建时从输出提取
 - 首次配置向导（start.js `cfWizard()`）：login（浏览器授权）→ create → route dns → 写 config.yml → 可选立即启动；login/route 用 `spawnSync` + `stdio: inherit`（需用户交互）
-- 启动：`spawn(exe, ['tunnel','--config',CF_CONFIG_FILE,'run','nodechat'], {detached, windowsHide})`，PID 写入 `.cloudflared.pid`；停止按 PID taskkill
+- 启动：`spawn(exe, ['tunnel','--config',CF_CONFIG_FILE,'run','z80z-chat'], {detached, windowsHide})`，PID 写入 `.cloudflared.pid`；停止按 PID taskkill
 - 公网可达检测：启动后 fetch `https://<hostname>/api/config`（30 秒超时轮询）
-- 注意：隧道进程与 NodeChat 服务相互独立，停止服务不会停隧道（反之亦然）；未登录/未创建隧道时启动会给出明确提示
+- 注意：隧道进程与 Z80Z-chat 服务相互独立，停止服务不会停隧道（反之亦然）；未登录/未创建隧道时启动会给出明确提示
 
 ### SakuraFRP（sfp* 函数族，v1.0.24 新增）
 

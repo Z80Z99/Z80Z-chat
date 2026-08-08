@@ -23,7 +23,7 @@ export function getUploadSecret() {
       fs.writeFileSync(secretFile, cachedSecret, 'utf8')
     }
   } catch {
-    cachedSecret = 'nodechat-upload-fallback-secret'
+    cachedSecret = 'z80z-chat-upload-fallback-secret'
   }
   return cachedSecret
 }

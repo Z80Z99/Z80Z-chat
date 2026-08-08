@@ -1,10 +1,10 @@
 /* ============================================================
- * NodeChat DEMO 项目管理菜单（纯模拟，零副作用）
- * 由 NodeChat-DEMO.bat 提取到 %TEMP%\nodechat-demo\ 后运行
+ * Z80Z-chat DEMO 项目管理菜单（纯模拟，零副作用）
+ * 由 Z80Z-chat-DEMO.bat 提取到 %TEMP%\z80z-chat-demo\ 后运行
  * 仅演示菜单交互：不启动服务 / 不写文件 / 不碰防火墙
  * ============================================================ */
 
-const SITE = 'NodeChat'
+const SITE = 'Z80Z-chat'
 const PORT = 35033
 const DEMO = true
 
@@ -200,7 +200,7 @@ async function showConfig() {
   section('语音 / 投屏')
   ;[
     kv('ICE 服务器', cyan('stun:stun.l.google.com:19302')),
-    kv('防火墙', green('开启 · 「NodeChat」'))
+    kv('防火墙', green('开启 · 「Z80Z-chat」'))
   ].forEach(log)
   hint('演示模式：配置仅为示意，不读取真实文件')
   await waitKey()
@@ -450,7 +450,7 @@ async function deploy() {
   log(dim('端口空闲'))
   log('配置防火墙规则 ...（模拟）')
   await new Promise(r => setTimeout(r, 300))
-  log(ok('防火墙规则「NodeChat」已应用（模拟，未添加真实规则）'))
+  log(ok('防火墙规则「Z80Z-chat」已应用（模拟，未添加真实规则）'))
   log('启动服务 ...（模拟）')
   await new Promise(r => setTimeout(r, 500))
   status = 'running'

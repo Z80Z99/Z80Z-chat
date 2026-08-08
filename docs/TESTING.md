@@ -1,4 +1,4 @@
-# NodeChat 自动化测试
+# Z80Z-chat 自动化测试
 
 ## 1. 运行方式
 
@@ -39,7 +39,7 @@ test/
 | 维度 | 机制 |
 |------|------|
 | 端口 | 随机分配（3100~3899），支持并行执行不冲突 |
-| 数据目录 | 临时目录（`os.tmpdir()/nodechat-test-xxx`），`DATA_DIR` 注入服务进程，结束后自动删除 |
+| 数据目录 | 临时目录（`os.tmpdir()/z80z-chat-test-xxx`），`DATA_DIR` 注入服务进程，结束后自动删除 |
 | 日志目录 | `LOG_DIR` 指向临时目录（logger 测试用） |
 | 服务进程 | 每个文件 before() 启动独立 `server.js` 子进程，after() 关闭 |
 

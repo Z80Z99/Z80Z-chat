@@ -1,4 +1,4 @@
-# NodeChat
+# Z80Z-chat
 
 仿 Discord 风格的社区聊天系统。100% 本地运行、零外部服务依赖（无数据库、无云服务）。
 
@@ -45,12 +45,12 @@ npm run start      # 构建并启动
 
 防火墙规则自动配置（首次启动弹 UAC 授权），局域网设备可直接访问。
 
-### 单文件部署（NodeChat.bat）
+### 单文件部署（Z80Z-chat.bat）
 
-本仓库是完整源码；单文件安装器 `NodeChat.bat` 是构建产物（内含引导层 + 源码 zip）：
+本仓库是完整源码；单文件安装器 `Z80Z-chat.bat` 是构建产物（内含引导层 + 源码 zip）：
 
 ```bash
-npm run build:single    # 生成 NodeChat.bat（版本号取自 package.json）
+npm run build:single    # 生成 Z80Z-chat.bat（版本号取自 package.json）
 ```
 
 生成的 bat 可直接分发：双击首次运行完成安装（下载 Node.js → npm install → 构建），之后作为启动器使用，支持智能快速更新。
@@ -59,8 +59,8 @@ npm run build:single    # 生成 NodeChat.bat（版本号取自 package.json）
 
 ```bash
 # 完整部署指南见 docs/DEPLOYMENT.md
-sudo cp deploy/nodechat.service /etc/systemd/system/
-sudo systemctl enable --now nodechat
+sudo cp deploy/z80z-chat.service /etc/systemd/system/
+sudo systemctl enable --now z80z-chat
 ```
 
 包含 systemd 服务模板（独立用户、自动重启、UMask=0077）、nginx 反向代理与 HTTPS/WSS 配置、Cloudflare Tunnel 兼容说明。
@@ -85,7 +85,7 @@ node scripts/restore.js     # 交互式恢复（恢复前自动保全当前数�
 ## 目录结构
 
 ```
-nodechat/
+z80z-chat/
 ├── start.bat / start.js    # Windows 交互式管理
 ├── server.js               # Express 服务入口
 ├── config.json             # 部署配置（含中文注释）
@@ -106,7 +106,7 @@ nodechat/
 | 文档 | 内容 |
 |------|------|
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Linux 部署、systemd、nginx 反代、HTTPS/WSS |
-| [docs/SINGLE-FILE.md](docs/SINGLE-FILE.md) | 单文件部署（NodeChat.bat）安装/更新/备份 |
+| [docs/SINGLE-FILE.md](docs/SINGLE-FILE.md) | 单文件部署（Z80Z-chat.bat）安装/更新/备份 |
 | [docs/BACKUP.md](docs/BACKUP.md) | 备份恢复流程与数据迁移 |
 | [docs/TESTING.md](docs/TESTING.md) | 测试架构与覆盖范围 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 故障排查指南 |

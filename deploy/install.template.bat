@@ -13,6 +13,9 @@ REM ============================================================
 set "APP_VERSION=__APP_VERSION__"
 REM build timestamp (injected by build script), shown as release time
 set "APP_BUILT=__APP_BUILT__"
+REM content fingerprint (sha256 of zip minus package.json, injected by build script)
+REM used by smart update: identical fingerprint -> skip backup/npm install/build
+set "PAYLOAD_SHA=__PAYLOAD_SHA__"
 REM keep bootstrap files next to this bat (not %TEMP%: AV PDM flags it)
 set "BS=%~dp0.z80z-chat-bootstrap.ps1"
 
@@ -44,6 +47,15 @@ goto :RUN
 
 
 
+
+
+
+
+
+
+
+
+
 __NODECHAT_PS_BEGIN__
 # ============================================================
 # Z80Z-chat single-file bootstrap (extracted by build script into
@@ -56,7 +68,8 @@ param(
   [string]$AppBuilt = '',
   [string]$SkipUpdatePrompt = '0',
   [string]$SkipUpdatePromptVersion = '',
-  [string]$LastProject = ''
+  [string]$LastProject = '',
+  [string]$PayloadSha = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -810,8 +823,60 @@ function Invoke-NpmBuild($projDir) {
   } finally { Pop-Location }
 }
 
-function Write-VersionMarker($projDir) {
-  $mv = '{"version": "' + $AppVersion + '", "installedAt": "' + (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') + '"}'
+# ---------- content fingerprint: sha256 of all files except package.json (matches build script) ----------
+function Compute-PayloadSha([string]$dir) {
+  $rels = @()
+  foreach ($f in (Get-ChildItem $dir -Recurse -Force -ErrorAction SilentlyContinue)) {
+    if ($f.PSIsContainer) { continue }
+    if ($f.Name -eq 'package.json') { continue }
+    $rels += $f.FullName.Substring($dir.Length).TrimStart('\').Replace('\', '/')
+  }
+  [Array]::Sort($rels, [System.StringComparer]::Ordinal)
+  $ms = New-Object System.IO.MemoryStream
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  foreach ($rel in $rels) {
+    $bytes = [System.IO.File]::ReadAllBytes((Join-Path $dir ($rel.Replace('/', '\'))))
+    $sb = [System.Text.Encoding]::UTF8.GetBytes($rel)
+    $ms.Write($sb, 0, $sb.Length)
+    $ms.WriteByte(0)
+    $hb = $sha.ComputeHash($bytes)
+    $ms.Write($hb, 0, $hb.Length)
+  }
+  $h = $sha.ComputeHash($ms.ToArray())
+  $hex = ''
+  foreach ($b in $h) { $hex += $b.ToString('x2') }
+  return $hex
+}
+
+# ---------- dependency fingerprint: sorted "deps:@version" entries (excludes package.json version field) ----------
+function Get-DepsKey([string]$pkgPath) {
+  if (-not (Test-Path $pkgPath)) { return '' }
+  try {
+    $pkg = ConvertFrom-JsonCompat ([System.IO.File]::ReadAllText($pkgPath, [System.Text.Encoding]::UTF8))
+    $list = New-Object System.Collections.ArrayList
+    foreach ($sec in @('dependencies', 'devDependencies')) {
+      $d = Get-JsonValue $pkg $sec
+      if ($d -eq $null) { continue }
+      if ($d -is [System.Collections.IDictionary]) {
+        $names = @($d.Keys)
+      } else {
+        $names = @($d.PSObject.Properties | ForEach-Object { $_.Name })
+      }
+      foreach ($n in $names) {
+        $v = Get-JsonValue $d $n
+        $null = $list.Add($sec + ':' + $n + '@' + $v)
+      }
+    }
+    $arr = @($list.ToArray())
+    [Array]::Sort($arr, [System.StringComparer]::Ordinal)
+    return ($arr -join '|')
+  } catch { return '' }
+}
+
+function Write-VersionMarker($projDir, [string]$payloadHash = '') {
+  $mv = '{"version": "' + $AppVersion + '", "installedAt": "' + (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') + '"'
+  if ($payloadHash -ne '') { $mv += ', "payloadHash": "' + $payloadHash + '"' }
+  $mv += '}'
   Write-Utf8 (Join-Path $projDir '.install-version') $mv
 }
 
@@ -934,6 +999,53 @@ function Install($cfg) {
   Run $projDir
 }
 
+# ---------- update tail (shared by fast / full paths): rename folder + completion screen ----------
+function Finish-Update($projDir) {
+  # 更新完成后同步文件夹名（名称-版本尾缀跟随新版本；失败不影响更新结果）
+  # 判断依据：文件夹名自身的 -x.y.z 尾缀（不依赖 .install-version 标记版本，
+  # 兼容"文件夹名版本早于标记版本"的历史错位场景）
+  $oldName = Split-Path $projDir -Leaf
+  $newName = ''
+  if ($oldName -match '^(.*)-(\d+\.\d+\.\d+)$') {
+    $newName = $Matches[1] + '-' + $AppVersion
+  }
+  if ($newName -ne '' -and $newName -ne $oldName) {
+    if (Test-Path (Join-Path $Root $newName)) {
+      Ln ''
+      Warn ('目标文件夹名已存在，保持原名：' + $oldName)
+    } else {
+      try {
+        Rename-Item $projDir $newName
+        $projDir = Join-Path $Root $newName
+        $null = Set-BatPreferenceSafe 'LAST_PROJECT' $newName
+        Ln ''
+        Ok ('项目文件夹已同步为：' + $newName)
+      } catch {
+        Ln ''
+        Warn ('文件夹重命名失败（可能被占用），保持原名：' + $oldName)
+        Hint '不影响更新结果'
+      }
+    }
+  } else {
+    $null = Set-BatPreferenceSafe 'LAST_PROJECT' $oldName
+  }
+  Remove-Item $ConfigFile -Force -ErrorAction SilentlyContinue
+  Ln ''
+  Separator
+  Ln ''
+  Ok '更新完成'
+  Ln ''
+  KeyValue '项目目录' $projDir
+  KeyValue '版本' $AppVersion
+  Ln ''
+  Hint '以后双击本文件即可进入管理菜单'
+  Ln ''
+  Separator
+  Ln ''
+  Read-Host '  按回车进入管理菜单'
+  Run $projDir
+}
+
 # ---------- update flow (decision page: update / switch version / skip prompt) ----------
 function Update($cfg, $projDir, $oldVer) {
   # 与 Run 一致：本地 nodejs 缺失时回退系统 node（首次安装选择过系统 node 的场景）
@@ -999,6 +1111,64 @@ function Update($cfg, $projDir, $oldVer) {
   if ($ch -eq 'Y' -or $ch -eq 'y') {
     Ln ''
     Stop-Service $projDir
+
+    # ---- 智能快速更新检测：内容指纹一致且依赖未变 → 跳过备份/npm install/构建 ----
+    $fast = $false
+    $newHash = ''
+    $fastReason = ''
+    if ($PayloadSha -eq '') {
+      $fastReason = '当前启动器未记录内容指纹，走完整更新'
+    } elseif ($oldVer -eq '') {
+      $fastReason = '目标项目无版本标记，走完整更新'
+    } else {
+      Progress '检查更新内容（内容指纹比对）...'
+      $tmp = Join-Path $Root ('.payload-check-' + [System.Guid]::NewGuid().ToString('N'))
+      New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+      try {
+        $b64 = Extract-Block '__NODECHAT_ZIP_B64_BEGIN__' '__NODECHAT_ZIP_B64_END__'
+        $tmpZip = Join-Path $tmp 'p.zip'
+        [System.IO.File]::WriteAllBytes($tmpZip, [System.Convert]::FromBase64String(($b64 -join '')))
+        # 解压到子目录：避免 zip 自身混入指纹计算（p.zip 会改变文件列表）
+        $tmpX = Join-Path $tmp 'x'
+        New-Item -ItemType Directory -Path $tmpX -Force | Out-Null
+        Expand-Zip $tmpZip $tmpX
+        $zipSha = Compute-PayloadSha $tmpX
+        $zipDeps = Get-DepsKey (Join-Path $tmpX 'package.json')
+        $oldMarker = @{}
+        try { $oldMarker = ConvertFrom-JsonCompat ([System.IO.File]::ReadAllText($mkFile, [System.Text.Encoding]::UTF8)) } catch {}
+        $oldHash = [string](Get-JsonValue $oldMarker 'payloadHash')
+        $oldDeps = ''
+        try { $oldDeps = Get-DepsKey (Join-Path $projDir 'package.json') } catch {}
+        if ($zipSha -ne $PayloadSha) { $fastReason = '源码内容已更新，走完整更新' }
+        elseif ($oldHash -eq '') { $fastReason = '旧版本未记录内容指纹，首次需完整更新' }
+        elseif ($oldHash -ne $zipSha) { $fastReason = '旧版本代码与此版本不同，走完整更新' }
+        elseif ($zipDeps -eq '' -or $zipDeps -ne $oldDeps) { $fastReason = '依赖已变化，走完整更新' }
+        elseif (-not (Test-Path (Join-Path $projDir 'node_modules')) -or -not (Test-Path (Join-Path $projDir 'dist'))) { $fastReason = '依赖或构建产物缺失，走完整更新' }
+        else { $fast = $true; $newHash = $zipSha }
+      } catch {
+        $fastReason = '更新内容检查失败（' + $_.Exception.Message + '），走完整更新'
+      } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+      }
+    }
+
+    if ($fast) {
+      Ln ''
+      Info '内容指纹一致，执行快速更新（无需重新下载依赖与构建，秒完成）'
+      Ln ''
+      Rebuild-Project $projDir
+      Ln ''
+      Progress '释放新版本项目文件...'
+      Write-Project $projDir $true
+      Write-VersionMarker $projDir $newHash
+      Finish-Update $projDir
+      return
+    }
+    if ($fastReason -ne '') {
+      Ln ''
+      Hint ('快速更新不可用：' + $fastReason)
+      Ln ''
+    }
     Backup-Data $projDir $cfg
     Rebuild-Project $projDir
     Ln ''
@@ -1008,22 +1178,8 @@ function Update($cfg, $projDir, $oldVer) {
     Invoke-NpmInstall $projDir $cfg
     Ln ''
     Invoke-NpmBuild $projDir
-    Write-VersionMarker $projDir
-    Remove-Item $ConfigFile -Force -ErrorAction SilentlyContinue
-    Ln ''
-    Separator
-    Ln ''
-    Ok '更新完成'
-    Ln ''
-    KeyValue '项目目录' $projDir
-    KeyValue '版本' $AppVersion
-    Ln ''
-    Hint '以后双击本文件即可进入管理菜单'
-    Ln ''
-    Separator
-    Ln ''
-    Read-Host '  按回车进入管理菜单'
-    Run $projDir
+    Write-VersionMarker $projDir $PayloadSha
+    Finish-Update $projDir
     return
   }
   if ($ch -eq 'S' -or $ch -eq 's') {
@@ -1323,4 +1479,4 @@ REM misaligned and executed as garbage ('" is not recognized',
 REM exit code 9009). Jumping to :MAIN keeps the PS line as the
 REM final command; cmd reads EOF right after it.
 :MAIN
-powershell -NoProfile -ExecutionPolicy Bypass -File "%BS%" -Root "%~dp0." -AppVersion "%APP_VERSION%" -AppBuilt "%APP_BUILT%" -SkipUpdatePrompt "%SKIP_UPDATE_PROMPT%" -SkipUpdatePromptVersion "%SKIP_UPDATE_PROMPT_VERSION%" -LastProject "%LAST_PROJECT%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BS%" -Root "%~dp0." -AppVersion "%APP_VERSION%" -AppBuilt "%APP_BUILT%" -SkipUpdatePrompt "%SKIP_UPDATE_PROMPT%" -SkipUpdatePromptVersion "%SKIP_UPDATE_PROMPT_VERSION%" -LastProject "%LAST_PROJECT%" -PayloadSha "%PAYLOAD_SHA%"

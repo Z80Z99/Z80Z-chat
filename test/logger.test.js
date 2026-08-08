@@ -10,7 +10,7 @@ const PROJECT_ROOT = path.join(__dirname, '..')
 // 隔离日志目录（项目内 .test-data，避免系统 Temp 活动）：必须在 import logger 前设置
 const logRoot = path.join(PROJECT_ROOT, '.test-data')
 fs.mkdirSync(logRoot, { recursive: true })
-const tmpLogDir = fs.mkdtempSync(path.join(logRoot, 'nodechat-log-'))
+const tmpLogDir = fs.mkdtempSync(path.join(logRoot, 'z80z-chat-log-'))
 process.env.LOG_DIR = tmpLogDir
 
 const { logger, getLogDir } = await import('../utils/logger.js')
@@ -67,7 +67,7 @@ test('error 写入 error.log，不写入 app.log', () => {
 
 test('日志写入失败不影响调用方（目录被文件占用）', () => {
   // 把日志目录替换为文件 → appendFileSync 失败
-  const badDir = path.join(logRoot, 'nodechat-log-bad-' + Date.now())
+  const badDir = path.join(logRoot, 'z80z-chat-log-bad-' + Date.now())
   fs.writeFileSync(badDir, 'this is a file not a dir')
   const old = getLogDir()
   process.env.LOG_DIR = badDir

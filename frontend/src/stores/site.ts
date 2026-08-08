@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 export const useSiteStore = defineStore('site', () => {
-  const siteName = ref('NodeChat')
+  const siteName = ref('Z80Z-chat')
 
   async function init() {
     try {

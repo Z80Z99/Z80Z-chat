@@ -1,7 +1,7 @@
 // ============================================================
-// NodeChat - DEMO 单文件构建脚本（纯模拟版本）
+// Z80Z-chat - DEMO 单文件构建脚本（纯模拟版本）
 // 用法：node scripts/build-demo.js
-// 输出：项目根 NodeChat-DEMO.bat（引导层模拟 + 内嵌 demo-start.js）
+// 输出：项目根 Z80Z-chat-DEMO.bat（引导层模拟 + 内嵌 demo-start.js）
 // 特点：不打包项目 zip；所有流程均为模拟，零副作用
 // ============================================================
 import fs from 'fs'
@@ -16,7 +16,7 @@ const projectRoot = path.join(__dirname, '..')
 const TEMPLATE = path.join(projectRoot, 'deploy', 'install.template.demo.bat')
 const DEMO_PS = path.join(projectRoot, 'scripts', 'demo-bootstrap.ps1')
 const DEMO_JS = path.join(projectRoot, 'scripts', 'demo-start.js')
-const OUTPUT = path.join(projectRoot, 'NodeChat-DEMO.bat')
+const OUTPUT = path.join(projectRoot, 'Z80Z-chat-DEMO.bat')
 
 function main() {
   const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
@@ -30,7 +30,7 @@ function main() {
   }
 
   console.log('')
-  console.log('  NodeChat DEMO 单文件构建（纯模拟）')
+  console.log('  Z80Z-chat DEMO 单文件构建（纯模拟）')
   console.log(`  版本: ${version}`)
   console.log('')
 

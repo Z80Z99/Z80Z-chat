@@ -1063,7 +1063,7 @@ export const useVoiceStore = defineStore('voice', () => {
   const VOICE_STATE_TTL = 60000
 
   function voiceStateKey() {
-    return `nodechat_voice_reconnect_${authStore.user?.id || 'guest'}`
+    return `z80z-chat_voice_reconnect_${authStore.user?.id || 'guest'}`
   }
 
   function saveVoiceState(serverId?: string) {

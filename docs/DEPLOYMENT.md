@@ -1,4 +1,4 @@
-# NodeChat Linux 部署指南
+# Z80Z-chat Linux 部署指南
 
 本文档面向 Linux 服务器长期运行部署。Windows 部署请使用 `start.bat`（不受本文档影响）。
 
@@ -25,31 +25,31 @@ npm -v
 使用独立低权限用户运行服务，禁止 root：
 
 ```bash
-sudo useradd --system --home /opt/nodechat --shell /usr/sbin/nologin nodechat
+sudo useradd --system --home /opt/z80z-chat --shell /usr/sbin/nologin z80z-chat
 ```
 
 ## 3. 部署项目目录
 
 ```bash
-sudo mkdir -p /opt/nodechat
-sudo cp -r /path/to/nodechat/. /opt/nodechat/   # 复制项目（不含 node_modules）
-sudo chown -R nodechat:nodechat /opt/nodechat
+sudo mkdir -p /opt/z80z-chat
+sudo cp -r /path/to/z80z-chat/. /opt/z80z-chat/   # 复制项目（不含 node_modules）
+sudo chown -R z80z-chat:z80z-chat /opt/z80z-chat
 ```
 
 数据与日志目录（权限 700，`UMask` 只影响新文件，已存在目录需手动设置）：
 
 ```bash
-sudo mkdir -p /opt/nodechat/data /opt/nodechat/logs
-sudo chown nodechat:nodechat /opt/nodechat/data /opt/nodechat/logs
-sudo chmod 700 /opt/nodechat/data /opt/nodechat/logs
+sudo mkdir -p /opt/z80z-chat/data /opt/z80z-chat/logs
+sudo chown z80z-chat:z80z-chat /opt/z80z-chat/data /opt/z80z-chat/logs
+sudo chmod 700 /opt/z80z-chat/data /opt/z80z-chat/logs
 ```
 
 ## 4. 安装依赖并构建前端
 
 ```bash
-cd /opt/nodechat
-sudo -u nodechat npm install --omit=dev   # 仅生产依赖（bcryptjs/multer/ws 等）
-sudo -u nodechat npm run build            # 产出 dist/
+cd /opt/z80z-chat
+sudo -u z80z-chat npm install --omit=dev   # 仅生产依赖（bcryptjs/multer/ws 等）
+sudo -u z80z-chat npm run build            # 产出 dist/
 ```
 
 构建产物为静态文件（`dist/`），由 server.js 托管，无需额外 Web 服务器。
@@ -57,9 +57,9 @@ sudo -u nodechat npm run build            # 产出 dist/
 ## 5. systemd 管理服务
 
 ```bash
-sudo cp deploy/nodechat.service /etc/systemd/system/
+sudo cp deploy/z80z-chat.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now nodechat       # 开机自启 + 立即启动
+sudo systemctl enable --now z80z-chat       # 开机自启 + 立即启动
 ```
 
 服务模板已包含：独立用户、`Restart=on-failure`、`UMask=0077`、安全加固、`PORT/DATA_DIR/LOG_DIR` 环境变量。如需修改环境变量，编辑模板或改用 `EnvironmentFile`。
@@ -67,37 +67,37 @@ sudo systemctl enable --now nodechat       # 开机自启 + 立即启动
 ## 6. 查看服务状态与日志
 
 ```bash
-systemctl status nodechat        # 运行状态 / 最近日志
-sudo systemctl restart nodechat  # 重启
-sudo systemctl stop nodechat     # 停止
+systemctl status z80z-chat        # 运行状态 / 最近日志
+sudo systemctl restart z80z-chat  # 重启
+sudo systemctl stop z80z-chat     # 停止
 
-journalctl -u nodechat -f        # 实时日志（journald）
+journalctl -u z80z-chat -f        # 实时日志（journald）
 # 应用自身日志（结构化）：
-tail -f /opt/nodechat/logs/app.log
-tail -f /opt/nodechat/logs/error.log
+tail -f /opt/z80z-chat/logs/app.log
+tail -f /opt/z80z-chat/logs/error.log
 ```
 
 ## 7. 更新版本流程
 
 ```bash
-cd /opt/nodechat
-sudo -u nodechat npm run backup              # 1. 先备份当前数据
-sudo systemctl stop nodechat                 # 2. 停止服务
-sudo -u nodechat cp -r . /opt/nodechat.old   # 3.（可选）整目录回退副本
+cd /opt/z80z-chat
+sudo -u z80z-chat npm run backup              # 1. 先备份当前数据
+sudo systemctl stop z80z-chat                 # 2. 停止服务
+sudo -u z80z-chat cp -r . /opt/z80z-chat.old   # 3.（可选）整目录回退副本
 # 4. 覆盖代码（保留 data/ 与 logs/！）
-sudo rsync -a --exclude node_modules --exclude data --exclude logs /新版本/ /opt/nodechat/
-sudo chown -R nodechat:nodechat /opt/nodechat
-sudo -u nodechat npm install --omit=dev
-sudo -u nodechat npm run build
-sudo systemctl start nodechat                # 5. 启动并验证
-systemctl status nodechat
+sudo rsync -a --exclude node_modules --exclude data --exclude logs /新版本/ /opt/z80z-chat/
+sudo chown -R z80z-chat:z80z-chat /opt/z80z-chat
+sudo -u z80z-chat npm install --omit=dev
+sudo -u z80z-chat npm run build
+sudo systemctl start z80z-chat                # 5. 启动并验证
+systemctl status z80z-chat
 ```
 
 > 更新时**绝不删除 `data/`**（数据库与上传文件）。如版本含数据库结构变化，先备份再更新。
 
 ## 8. nginx 反向代理
 
-NodeChat 无内置 TLS，公网部署建议用 nginx 终止 HTTPS 并转发：
+Z80Z-chat 无内置 TLS，公网部署建议用 nginx 终止 HTTPS 并转发：
 
 ```nginx
 server {
@@ -147,7 +147,7 @@ HTTPS 生效后，浏览器访问 `https://`，前端自动使用 `wss://`，Web
 
 ## 10. Cloudflare Tunnel 部署注意事项
 
-- NodeChat 的 API 为相对路径、WS 协议自适应，**原生兼容 Cloudflare Tunnel**，无需代码修改
+- Z80Z-chat 的 API 为相对路径、WS 协议自适应，**原生兼容 Cloudflare Tunnel**，无需代码修改
 - Tunnel 配置（`cloudflared`）默认支持 WebSocket；如遇 WS 失败，确认 Tunnel 配置未禁用 WS 流（无需 `--no-ws`）
 - 若 Tunnel 后仍希望隐藏真实端口，`cloudflared tunnel --url http://localhost:3000` 即可
 - 注意：`corsOrigins` 默认 `*`（反射来源），经 Tunnel 同域访问无跨域问题

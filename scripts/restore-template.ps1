@@ -1,6 +1,6 @@
 ﻿# ============================================================
 # restore-template.ps1 - rebuild deploy/install.template.bat
-# from a built NodeChat.bat artifact (reverse of build-single.js)
+# from a built Z80Z-chat.bat artifact (reverse of build-single.js)
 #
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore-template.ps1
 # The recovered template keeps the embedded PS block (base64),
@@ -8,7 +8,7 @@
 # can rebuild an equivalent artifact.
 # ============================================================
 param(
-  [string]$Source = 'E:\Opencode Project\Z80Z\NodeChat.bat',
+  [string]$Source = 'E:\Opencode Project\Z80Z\Z80Z-chat.bat',
   [string]$Output = 'E:\Opencode Project\Z80Z\deploy\install.template.bat'
 )
 

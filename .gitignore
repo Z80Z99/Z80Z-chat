@@ -4,8 +4,8 @@ node_modules/
 # ── 构建产物 ──
 dist/
 frontend/dist/
-NodeChat.bat
-NodeChat-DEMO.bat
+Z80Z-chat.bat
+Z80Z-chat-DEMO.bat
 
 # ── 运行时数据（含用户隐私：账号密码哈希/会话/消息/上传文件，切勿上传）──
 data/

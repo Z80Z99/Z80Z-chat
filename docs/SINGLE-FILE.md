@@ -1,23 +1,23 @@
-# 单文件部署模式（NodeChat.bat）
+# 单文件部署模式（Z80Z-chat.bat）
 
-NodeChat 可打包为**单个文件**（`NodeChat.bat`，约 300KB），双击即可完成
+Z80Z-chat 可打包为**单个文件**（`Z80Z-chat.bat`，约 300KB），双击即可完成
 Node.js 下载、依赖安装、前端构建、启动服务全流程，适合分发给非技术用户。
 
 ## 运行结构
 
-建议将 `NodeChat.bat` 放入一个**空白文件夹**，首次双击完成安装后目录结构如下：
+建议将 `Z80Z-chat.bat` 放入一个**空白文件夹**，首次双击完成安装后目录结构如下：
 
 ```
 部署文件夹/
-├── NodeChat.bat        # 单文件安装程序（以后双击 = 管理菜单）
+├── Z80Z-chat.bat        # 单文件安装程序（以后双击 = 管理菜单）
 ├── nodejs/             # 自带的 Node.js 运行时（选择"自动下载"时生成）
 ├── data-backup/        # 外层数据备份目录（更新时自动备份）
-└── nodechat/           # 项目本体（start.js / config.json / data/ …）
+└── z80z-chat/           # 项目本体（start.js / config.json / data/ …）
 ```
 
-- 项目文件夹名可在首次安装时指定（默认 `nodechat`）
+- 项目文件夹名可在首次安装时指定（默认 `z80z-chat`）
 - 卸载 = 直接删除整个部署文件夹
-- 再次双击 `NodeChat.bat` 会自动发现已安装项目并进入管理菜单
+- 再次双击 `Z80Z-chat.bat` 会自动发现已安装项目并进入管理菜单
 
 ## 安装流程（首次双击）
 
@@ -44,7 +44,7 @@ Node.js 下载、依赖安装、前端构建、启动服务全流程，适合分
 
 ## 更新流程
 
-- 将新版 `NodeChat.bat` 覆盖部署文件夹中的旧版，再双击运行
+- 将新版 `Z80Z-chat.bat` 覆盖部署文件夹中的旧版，再双击运行
 - 检测到版本不同会询问是否更新：停止服务 → 备份数据（data-backup/）→ 重建项目 → 同步依赖 → 重新构建
 - 更新**保留**：`data/`、`logs/`、`node_modules/`、`config.json`（用户端口/镜像/备份保留设置不丢失）
 
@@ -57,8 +57,8 @@ Node.js 下载、依赖安装、前端构建、启动服务全流程，适合分
 
 - 无公网 IP 也能对外访问：主菜单「隧道管理」→ 选择服务（Cloudflare Tunnel / SakuraFRP）
 - **Cloudflare Tunnel**：`https://chat.z80z99.cn`（需将域名 NS 接入 Cloudflare），cloudflared 按需下载到外层 `cloudflared/` 目录（下载前测速选择线路）
-- **SakuraFRP（国内低延迟）**：需 natfrp.com 账号（免费 2 隧道 / 10Mbps / 5GiB 每月），frpc 下载链接从面板「软件下载」复制粘贴，隧道在面板创建（本地 IP 127.0.0.1，端口 = NodeChat 端口），连接方式支持交互（frpc TUI）与命令行（`-f 密钥:隧道ID`）两种
-- 两者均为后台运行 + PID 记录，互不影响，与 NodeChat 服务独立
+- **SakuraFRP（国内低延迟）**：需 natfrp.com 账号（免费 2 隧道 / 10Mbps / 5GiB 每月），frpc 下载链接从面板「软件下载」复制粘贴，隧道在面板创建（本地 IP 127.0.0.1，端口 = Z80Z-chat 端口），连接方式支持交互（frpc TUI）与命令行（`-f 密钥:隧道ID`）两种
+- 两者均为后台运行 + PID 记录，互不影响，与 Z80Z-chat 服务独立
 
 ## 智能快速更新（v1.0.24+）
 
@@ -85,6 +85,6 @@ Node.js 下载、依赖安装、前端构建、启动服务全流程，适合分
 npm run build:single    # 或 node scripts/build-single.js
 ```
 
-- 输出：项目根目录 `NodeChat.bat`（版本号取自 package.json）
+- 输出：项目根目录 `Z80Z-chat.bat`（版本号取自 package.json）
 - 打包内容：引导层（部署/install.template.bat）+ start.js + 项目源码 zip
 - 排除：node_modules / dist / data / logs / start.js / start.bat / package-lock.json / 构建产物自身

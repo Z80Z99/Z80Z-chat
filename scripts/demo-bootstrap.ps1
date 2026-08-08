@@ -1,6 +1,6 @@
 # ============================================================
-# NodeChat DEMO bootstrap - pure menu simulation, zero side effects
-# (embedded into NodeChat-DEMO.bat by scripts/build-demo.js)
+# Z80Z-chat DEMO bootstrap - pure menu simulation, zero side effects
+# (embedded into Z80Z-chat-DEMO.bat by scripts/build-demo.js)
 # ============================================================
 param(
   [string]$Root = '.',
@@ -16,7 +16,7 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $script:Root = ([string]$Root).Trim().Trim('"')
 $script:Root = [System.IO.Path]::GetFullPath($script:Root)
-$script:SimFile = Join-Path $script:Root '.nodechat-bootstrap.ps1'
+$script:SimFile = Join-Path $script:Root '.z80z-chat-bootstrap.ps1'
 $script:DemoVersion = '1.0.18-demo'
 
 # ---------- output helpers (VT-capable terminals get color) ----------
@@ -79,9 +79,9 @@ function Test-SystemNode {
   return @{ ok = $false; version = '' }
 }
 
-# ---------- extract embedded start.js block from NodeChat-DEMO.bat ----------
+# ---------- extract embedded start.js block from Z80Z-chat-DEMO.bat ----------
 function Get-EmbeddedStartJs {
-  $bat = Join-Path $script:Root 'NodeChat-DEMO.bat'
+  $bat = Join-Path $script:Root 'Z80Z-chat-DEMO.bat'
   $lines = [System.IO.File]::ReadAllLines($bat, [System.Text.Encoding]::UTF8)
   $b = [Array]::IndexOf($lines, '__NODECHAT_STARTJS_BEGIN__')
   $e = [Array]::IndexOf($lines, '__NODECHAT_STARTJS_END__')
@@ -94,7 +94,7 @@ function Get-EmbeddedStartJs {
 # ============================================================
 function Demo-Main {
   for (;;) {
-    H1 'NodeChat 演示模式'
+    H1 'Z80Z-chat 演示模式'
     Ln ''
     Info '本版本仅模拟菜单交互，不会执行任何真实操作'
     Ln ''
@@ -232,25 +232,25 @@ function Demo-AskPort {
 
 # ---------- 首次安装流程（全部模拟） ----------
 function Demo-Install {
-  H1 'NodeChat 安装（模拟）'
+  H1 'Z80Z-chat 安装（模拟）'
   Ln ''
   Info '首次运行项目安装，正在初始化项目...'
   Ln ''
   Separator
   Ln ''
-  $pn = (Read-Host '  项目文件夹名称（名称后自动追加版本号，留空默认 nodechat-版本号）').Trim()
-  if ($pn -eq '') { $pn = 'nodechat' }
+  $pn = (Read-Host '  项目文件夹名称（名称后自动追加版本号，留空默认 z80z-chat-版本号）').Trim()
+  if ($pn -eq '') { $pn = 'z80z-chat' }
   while ($pn -match '[<>:"/\\|?*]' -or $pn -match '\s') {
     Bad '文件夹名称包含非法字符（< > : " / \ | ? * 或空格），请重新输入'
-    $pn = (Read-Host '  项目文件夹名称（名称后自动追加版本号，留空默认 nodechat-版本号）').Trim()
-    if ($pn -eq '') { $pn = 'nodechat' }
+    $pn = (Read-Host '  项目文件夹名称（名称后自动追加版本号，留空默认 z80z-chat-版本号）').Trim()
+    if ($pn -eq '') { $pn = 'z80z-chat' }
   }
   $script:demoProj = $pn + '-1.0.18'
   Ln ''
   Ok ('项目文件夹：' + $script:demoProj + '（模拟，不会实际创建）')
   Ln ''
   if (-not (Demo-NodeJs)) { return }
-  Demo-ChooseLine 'NodeChat 项目依赖包（npm install，约 90MB）'
+  Demo-ChooseLine 'Z80Z-chat 项目依赖包（npm install，约 90MB）'
   Demo-AskPort
   Ln ''
   Progress '（模拟）释放项目文件...'
@@ -278,7 +278,7 @@ function Demo-Install {
 
 # ---------- 版本更新流程（全部模拟） ----------
 function Demo-Update {
-  H1 'NodeChat 更新（模拟）'
+  H1 'Z80Z-chat 更新（模拟）'
   Ln ''
   Info '检测到新版本！'
   Ln ''
@@ -354,9 +354,9 @@ function Demo-SwitchVersion {
   Ln ''
   Info '请选择要使用的版本：'
   Ln ''
-  Item 1 'nodechat-1.0.17'
+  Item 1 'z80z-chat-1.0.17'
   Hint '      1.0.17  安装于 2026-07-30T10:00:00'
-  Item 2 'nodechat-1.0.18  [当前]'
+  Item 2 'z80z-chat-1.0.18  [当前]'
   Hint '      1.0.18  安装于 2026-08-04T11:16:28'
   Ln ''
   Separator
@@ -364,7 +364,7 @@ function Demo-SwitchVersion {
   $ch = (Read-Host '  选择版本编号（0 返回）').Trim()
   if ($ch -eq '1') {
     Ln ''
-    Ok '已切换到：nodechat-1.0.17（模拟，未写入偏好）'
+    Ok '已切换到：z80z-chat-1.0.17（模拟，未写入偏好）'
   } elseif ($ch -eq '2') {
     Ln ''
     Info '已在使用该版本'
@@ -391,7 +391,7 @@ function Demo-RunManager {
   }
   try {
     $js = Get-EmbeddedStartJs
-    $demoDir = Join-Path $env:TEMP 'nodechat-demo'
+    $demoDir = Join-Path $env:TEMP 'z80z-chat-demo'
     New-Item -ItemType Directory -Path $demoDir -Force | Out-Null
     $demoJs = Join-Path $demoDir 'start.js'
     $enc = New-Object System.Text.UTF8Encoding($false)

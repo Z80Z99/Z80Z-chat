@@ -26,7 +26,7 @@ export function getDataDir() {
 export async function startServer() {
   if (!tmpDataDir) {
     fs.mkdirSync(TEST_DATA_ROOT, { recursive: true })
-    tmpDataDir = fs.mkdtempSync(path.join(TEST_DATA_ROOT, 'nodechat-test-'))
+    tmpDataDir = fs.mkdtempSync(path.join(TEST_DATA_ROOT, 'z80z-chat-test-'))
   }
   logs = ''
   proc = spawn(process.execPath, ['server.js'], {

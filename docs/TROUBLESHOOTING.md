@@ -1,4 +1,4 @@
-# NodeChat 故障排查指南
+# Z80Z-chat 故障排查指南
 
 ## 1. 服务无法启动
 
@@ -8,7 +8,7 @@
 
 ```bash
 # Linux：查看失败原因
-journalctl -u nodechat -n 50
+journalctl -u z80z-chat -n 50
 
 # Windows：直接前台运行看错误
 node server.js
@@ -21,7 +21,7 @@ node server.js
 | 端口被占用 | 见下方「端口占用排查」 |
 | `config.json` 语法错误 | 报错会提示"配置文件解析失败"，修复引号/逗号/注释，或直接删除文件（重启自动重建默认配置） |
 | `dist/` 不存在（未构建） | 执行 `npm run build`；`/api/version` 返回 `{"version":0}` 也说明未构建 |
-| 数据目录不可写（Linux 权限） | `chown -R nodechat:nodechat data logs && chmod 700 data logs` |
+| 数据目录不可写（Linux 权限） | `chown -R z80z-chat:z80z-chat data logs && chmod 700 data logs` |
 | node 版本过旧 | 要求 Node 18+（建议 20+/22 LTS） |
 
 **日志定位**：启动成功后查看 `logs/app.log` 中的"服务启动成功"记录；异常记录在 `logs/error.log`。
@@ -42,7 +42,7 @@ ss -ltnp | grep 3000
 sudo kill -9 <pid>          # 或 systemctl stop 占用该端口的服务
 ```
 
-**说明**：start.js 主菜单会检测端口并自动清理旧进程（状态灯反映真实进程）；若端口被非 NodeChat 进程占用会显示「端口冲突」黄灯。修改端口：编辑 `config.json` 的 `port` 后重启（或设置 `PORT` 环境变量）。
+**说明**：start.js 主菜单会检测端口并自动清理旧进程（状态灯反映真实进程）；若端口被非 Z80Z-chat 进程占用会显示「端口冲突」黄灯。修改端口：编辑 `config.json` 的 `port` 后重启（或设置 `PORT` 环境变量）。
 
 ## 3. 日志查看方法
 
@@ -50,7 +50,7 @@ sudo kill -9 <pid>          # 或 systemctl stop 占用该端口的服务
 |------|------|------|
 | 应用日志 | `logs/app.log` | `[时间] [INFO/WARN] 消息`：启动/关闭/上传失败等 |
 | 错误日志 | `logs/error.log` | `[时间] [ERROR] 消息`：请求异常、DB 写入失败、未捕获异常 |
-| systemd 日志 | `journalctl -u nodechat -f` | 进程级输出 |
+| systemd 日志 | `journalctl -u z80z-chat -f` | 进程级输出 |
 
 日志格式：`[ISO时间] [级别] [消息]`。日志目录可通过 `LOG_DIR` 环境变量修改。写入失败不影响服务运行（静默降级）。
 
@@ -83,7 +83,7 @@ cp data/backups/db-xxx.json data/db.json
 | 上传报「文件过大」 | 超过 `maxUploadSizeMB` | 调整配置后重启 |
 | 图片/附件加载 404 | 文件被清理（消息删除后无引用附件自动删除） | 属预期行为；重新上传 |
 | `uploads/` 目录存在孤儿文件 | 历史遗留或异常中断 | 附件已实现删除时清理；孤儿文件可手动删除（未被任何消息引用） |
-| Linux 上传失败（EACCES） | 目录权限不足 | `chown nodechat:nodechat data/uploads && chmod 700 data/uploads` |
+| Linux 上传失败（EACCES） | 目录权限不足 | `chown z80z-chat:z80z-chat data/uploads && chmod 700 data/uploads` |
 
 ## 6. WebSocket 连接失败
 
