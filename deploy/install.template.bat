@@ -1,5 +1,6 @@
 @echo off
-chcp 65001 >nul
+REM <nul keeps chcp from consuming shared stdin when input is redirected
+chcp 65001 >nul <nul
 cd /d "%~dp0"
 title Z80Z-chat
 
@@ -42,6 +43,7 @@ REM process shares the same file handle; a preceding process would
 REM advance the pointer to EOF and break Read-Host in the -File
 REM stage below. NUL keeps this helper from touching the handle.
 del /q "%BS%" >nul 2>nul
+del /q "%TEMP%\z80z-chat-bootstrap.ps1" >nul 2>nul
 goto :RUN
 
 
@@ -93,7 +95,7 @@ $NodeDir = Join-Path $Root 'nodejs'
 $NodeExe = Join-Path $NodeDir 'node.exe'
 $BackupRoot = Join-Path $Root 'data-backup'
 $ConfigFile = Join-Path $Root '.install-config.json'
-$ScriptFile = Join-Path $Root '.z80z-chat-bootstrap.ps1'
+$ScriptFile = $MyInvocation.MyCommand.Path
 
 # 正常退出时自删（防止中断/异常退出残留）；bat 提取前也会清理上次残留
 function Self-Clean {
@@ -236,6 +238,77 @@ function Set-BatPreferenceSafe([string]$key, [string]$value) {
     }
     return $false
   }
+}
+
+# ---------- install root resolution (bat dir not writable -> relocate) ----------
+# bat 所在目录不可写时（只读磁盘/云同步目录锁定/杀毒软件拦截），
+# 让用户选择其他安装位置；选择记录在 bat 目录的 .z80z-chat-root 标记文件，
+# 下次运行（包括用新版本 bat 替换后）自动沿用
+function Test-DirWritable([string]$dir) {
+  if ([string]::IsNullOrEmpty($dir)) { return $false }
+  try {
+    $probe = Join-Path $dir ('.z80z-wtest-' + [System.Guid]::NewGuid().ToString('N') + '.txt')
+    [System.IO.File]::WriteAllText($probe, 'ok')
+    Remove-Item $probe -Force -ErrorAction SilentlyContinue
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Resolve-InstallRoot {
+  $marker = Join-Path $Root '.z80z-chat-root'
+  # 已有标记且目标目录存在：直接沿用
+  if (Test-Path -LiteralPath $marker) {
+    try {
+      $cand = ([System.IO.File]::ReadAllText($marker, [System.Text.Encoding]::UTF8)).Trim()
+      if ($cand -ne '' -and (Test-Path -LiteralPath $cand)) {
+        $full = [System.IO.Path]::GetFullPath($cand)
+        if ($full -ne $Root) { return $full }
+      }
+    } catch {}
+  }
+  # bat 目录可写：默认原地安装（历史行为不变）
+  if (Test-DirWritable $Root) { return $Root }
+  H1 '选择安装位置'
+  Ln ''
+  Warn ('当前目录不可写：' + $Root)
+  Ln ''
+  Hint '  可能原因：只读磁盘（U盘/光盘）、云同步目录锁定、杀毒软件拦截'
+  Hint '  安装需要在所选目录内创建项目文件夹并写入文件'
+  Ln ''
+  $homeDir = Join-Path $env:USERPROFILE 'Z80Z-chat'
+  Item 1 ('默认位置：' + $homeDir)
+  Item 2 '手动输入其他目录'
+  Item 3 '退出'
+  Ln ''
+  Separator
+  Ln ''
+  $ch = (Read-Host '  输入选项编号').Trim()
+  if ($ch -eq '2') {
+    $homeDir = (Read-Host '  输入完整目录路径（例如 D:\Z80Z-chat）').Trim()
+    if ($homeDir -eq '') { Self-Clean; exit 0 }
+  } elseif ($ch -ne '1') {
+    Self-Clean
+    exit 0
+  }
+  try { New-Item -ItemType Directory -Path $homeDir -Force | Out-Null } catch {}
+  if (-not (Test-DirWritable $homeDir)) {
+    Bad ('所选目录不可写：' + $homeDir)
+    Ln ''
+    Separator
+    Ln ''
+    Read-Host '  按回车退出'
+    Self-Clean
+    exit 1
+  }
+  $chosen = [System.IO.Path]::GetFullPath($homeDir)
+  # 标记写入 bat 目录；bat 目录不可写时静默跳过（下次运行会重新询问）
+  try { Write-Utf8 $marker $chosen } catch {}
+  Ln ''
+  Ok ('安装位置：' + $chosen)
+  Ln ''
+  return $chosen
 }
 
 # ---------- JSON parsing (PS 2.0 fallback: JavaScriptSerializer) ----------
@@ -970,6 +1043,12 @@ function Write-Project($projDir, [bool]$keepConfig = $false) {
 
 # ---------- npm install / build (system node or bundled nodejs) ----------
 function Invoke-NpmInstall($projDir, $cfg) {
+  # 内置 Node.js 目录加入 PATH：npm 安装脚本（如 esbuild 的 node install.js）
+  # 经 cmd /c 子进程执行，子进程从 PATH 找 node；PowerShell 会话级的
+  # $env:PATH 修改会随环境块传给子进程，不会写入系统
+  if (-not $script:useSystemNode -and (Test-Path $NodeExe)) {
+    $env:PATH = $NodeDir + ';' + $env:PATH
+  }
   # registry 候选链：当前线路 → npmmirror → npm 官方（自动切换，避免单源故障）
   $registryList = @()
   $cur = $cfg['npmRegistry']
@@ -1020,6 +1099,10 @@ function Invoke-NpmInstall($projDir, $cfg) {
 }
 
 function Invoke-NpmBuild($projDir) {
+  # 与 Invoke-NpmInstall 一致：构建脚本（vite/esbuild）同样经子进程找 node
+  if (-not $script:useSystemNode -and (Test-Path $NodeExe)) {
+    $env:PATH = $NodeDir + ';' + $env:PATH
+  }
   Push-Location $projDir
   try {
     Progress '构建前端（npm run build）...'
@@ -1519,6 +1602,12 @@ function Apply-OsFallback($cfg) {
 
 # ---------- main ----------
 try {
+  # 根目录解析：bat 所在目录不可写（只读磁盘/云同步/杀软拦截）时重定位安装位置
+  $Root = Resolve-InstallRoot
+  $NodeDir = Join-Path $Root 'nodejs'
+  $NodeExe = Join-Path $NodeDir 'node.exe'
+  $BackupRoot = Join-Path $Root 'data-backup'
+  $ConfigFile = Join-Path $Root '.install-config.json'
   $cfg = Apply-OsFallback (Read-Config)
   $found = Find-Project
 
@@ -1674,8 +1763,9 @@ __ZIP_B64_PLACEHOLDER__
 __NODECHAT_ZIP_B64_END__
 
 :RUN
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$l=[IO.File]::ReadAllLines('%~f0',[Text.Encoding]::UTF8);$s=[Array]::IndexOf($l,'__NODECHAT_PS_B64_BEGIN__');$e=[Array]::IndexOf($l,'__NODECHAT_PS_B64_END__');if($s -lt 0 -or $e -lt 0){exit 9};$b=[Convert]::FromBase64String(($l[($s+1)..($e-1)] -join ''));[IO.File]::WriteAllBytes('%~dp0.z80z-chat-bootstrap.ps1',$b)" <nul
-if not exist "%BS%" goto :FAIL
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$l=[IO.File]::ReadAllLines('%~f0',[Text.Encoding]::UTF8);$s=[Array]::IndexOf($l,'__NODECHAT_PS_B64_BEGIN__');$e=[Array]::IndexOf($l,'__NODECHAT_PS_B64_END__');if($s -lt 0 -or $e -lt 0){exit 9};$b=[Convert]::FromBase64String(($l[($s+1)..($e-1)] -join ''));$p='%~dp0.z80z-chat-bootstrap.ps1';try{[IO.File]::WriteAllBytes($p,$b)}catch{try{[IO.File]::WriteAllBytes((Join-Path $env:TEMP 'z80z-chat-bootstrap.ps1'),$b)}catch{exit 9}}" <nul
+if exist "%BS%" (set "BS_USE=%BS%") else (set "BS_USE=%TEMP%\z80z-chat-bootstrap.ps1")
+if not exist "%BS_USE%" goto :FAIL
 goto :MAIN
 
 :FAIL
@@ -1690,4 +1780,4 @@ REM misaligned and executed as garbage ('" is not recognized',
 REM exit code 9009). Jumping to :MAIN keeps the PS line as the
 REM final command; cmd reads EOF right after it.
 :MAIN
-powershell -NoProfile -ExecutionPolicy Bypass -File "%BS%" -Root "%~dp0." -AppVersion "%APP_VERSION%" -AppBuilt "%APP_BUILT%" -SkipUpdatePrompt "%SKIP_UPDATE_PROMPT%" -SkipUpdatePromptVersion "%SKIP_UPDATE_PROMPT_VERSION%" -LastProject "%LAST_PROJECT%" -PayloadSha "%PAYLOAD_SHA%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BS_USE%" -Root "%~dp0." -AppVersion "%APP_VERSION%" -AppBuilt "%APP_BUILT%" -SkipUpdatePrompt "%SKIP_UPDATE_PROMPT%" -SkipUpdatePromptVersion "%SKIP_UPDATE_PROMPT_VERSION%" -LastProject "%LAST_PROJECT%" -PayloadSha "%PAYLOAD_SHA%"

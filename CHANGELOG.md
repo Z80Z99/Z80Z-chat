@@ -1,5 +1,15 @@
 # Changelog
 
+## Z80Z-chat v1.0.2（2026-08-14）
+
+安装器环境兼容性修复（针对真实用户机器上报的两个安装失败场景）。
+
+### 修复
+
+- **内置 Node.js 未加入 PATH**：npm install 的安装脚本（如 esbuild 的 `node install.js`）经 `cmd /c` 子进程执行，内置 `nodejs/` 目录不在 PATH 中导致 `'node' is not recognized`，依赖安装退出码 1。现在安装与构建前自动把 `nodejs/` 注入会话 PATH
+- **bat 所在目录不可写**：bootstrap 提取写 `%~dp0` 失败（只读磁盘/云同步目录锁定/杀软拦截）直接中断安装。现在自动回退 `%TEMP%` 提取；并新增安装位置选择（默认用户目录下 Z80Z-chat 或手动指定），选择记录在 `.z80z-chat-root` 标记文件，下次运行自动沿用
+- **chcp 消耗重定向输入**：`chcp 65001` 在 stdin 重定向时会消耗共享输入句柄，导致后续 `Read-Host` 全部读到 EOF（自动化/管道场景）。加 `<nul` 隔离
+
 ## Z80Z-chat v1.0.1（2026-08-13）
 
 安装器 Node.js 下载链路全面修复。

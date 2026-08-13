@@ -131,10 +131,10 @@ z80z-chat/
 
 ## 当前状态（上次会话结束时）
 
-- 服务已停止，端口 3000 空闲
-- 数据已清空（测试所致），首次启动即为全新状态
-- 所有菜单功能已测试通过：启动/重启/停止/后台/清档/查看配置/项目说明/编辑配置
-- 最近完成：start.js 全部菜单重设计（简洁头部 + 状态自适应选项 + 项目清档）
+- 版本 v1.0.2（安装器环境兼容性修复，发布准备中）
+- 修复内容：内置 nodejs/ 注入会话 PATH（npm install 的 esbuild 等安装脚本找不到 node 的根因）；bootstrap 提取失败回退 %TEMP% + 安装位置选择（`.z80z-chat-root` 标记持久化）；`chcp 65001 >nul <nul` 隔离重定向 stdin
+- E2E 验证通过：只读目录（icacls deny）+ 内置 nodejs 下载 + npm install + vite build 全流程 exit 0
+- 测试手法记录：安装器 E2E 用 `cmd /c "bat < answers.txt"`，PS 层 Read-Host 按序消费行，末尾喂 start.js 主菜单选项；注意 PS 5.1 读无 BOM ps1 按 ANSI（测试脚本要写 BOM）；bat 可执行段必须纯 ASCII
 
 ## 修改约定
 
