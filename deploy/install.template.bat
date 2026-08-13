@@ -422,7 +422,11 @@ function Get-NodeVersion([string]$mirror, [string]$major) {
     $list = ConvertFrom-JsonCompat $txt
     foreach ($item in $list) {
       $v = Get-JsonValue $item 'version'
-      if ($v -like ('v' + $major + '.*')) { return $v }
+      if ($v -like ('v' + $major + '.*')) {
+        # index.json 的 version 带 v 前缀（如 "v22.23.2"），返回裸版本号，
+        # 调用方拼接 '/v' + $ver 才不会变成 '/vv22.23.2/'（404）
+        return ($v -replace '^v', '')
+      }
     }
   } catch {}
   return $null
