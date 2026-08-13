@@ -442,28 +442,74 @@ function Get-Sha256([string]$path) {
   return $sb.ToString()
 }
 
-# ---------- download (no proxy, TLS1.2, timeout via HttpWebRequest) ----------
+# ---------- download (chunked with Range resume: 4MB per request) ----------
+# 设计目标：不稳定网络下大文件（约 35MB）下载不中断失败。
+# - 绕过系统代理（避免 v2ray/Clash 系统代理干扰）
+# - 显式 TLS 1.2（PS 5.1 默认可能回退 TLS1.0）
+# - 分块下载（4MB/请求），单块失败仅重传该块（断点续传），不从头再来
+# - 服务器不支持 Range（返回 200 而非 206）时回退单次完整下载
 function Download-File([string]$url, [string]$dest) {
-  # 绕过系统代理（WebClient 默认继承 IE 代理设置，用户开代理软件时会导致全线下载失败）
-  # 显式 TLS 1.2（PS 5.1 SystemDefault 可能回退到 TLS1.0 被服务器拒绝）
-  # 用 HttpWebRequest + 流式写出：支持超时（WebClient.DownloadFile 无法设置超时，可能无限挂起）
   try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
-  $req = [System.Net.HttpWebRequest]::Create($url)
-  $req.Method = 'GET'
-  $req.Timeout = 120000
-  $req.ReadWriteTimeout = 120000
-  $req.Proxy = $null
-  $resp = $req.GetResponse()
-  try {
-    $in = $resp.GetResponseStream()
-    $out = [System.IO.File]::Create($dest)
-    try {
-      $buf = New-Object byte[] 65536
-      while (($read = $in.Read($buf, 0, $buf.Length)) -gt 0) {
-        $out.Write($buf, 0, $read)
+  $chunkSize = 4 * 1024 * 1024
+  $maxAttempts = 8
+  # 已下载大小（支持断点续传：失败重试时从已有字节继续）
+  $offset = 0
+  if (Test-Path $dest) { try { $offset = (Get-Item $dest).Length } catch { $offset = 0 } }
+  if ($offset -lt 0) { $offset = 0 }
+  $total = $null
+  while ($true) {
+    $attempt = 0
+    while ($attempt -lt $maxAttempts) {
+      $attempt++
+      try {
+        $req = [System.Net.HttpWebRequest]::Create($url)
+        $req.Method = 'GET'
+        $req.Timeout = 120000
+        $req.ReadWriteTimeout = 120000
+        $req.Proxy = $null
+        if ($offset -gt 0) { $req.AddRange([long]$offset) }
+        $resp = $req.GetResponse()
+        if ($resp.StatusCode -eq [System.Net.HttpStatusCode]::PartialContent) {
+          # Range 续传成功：追加写入当前块
+          if ($null -eq $total) { $total = $resp.ContentLength + $offset }
+          $in = $resp.GetResponseStream()
+          $out = [System.IO.File]::Open($dest, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write)
+          try {
+            $buf = New-Object byte[] $chunkSize
+            $readThis = 0
+            while (($read = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+              $out.Write($buf, 0, $read)
+              $offset += $read
+              $readThis += $read
+              if ($readThis -ge $chunkSize) { break }
+            }
+          } finally { $out.Close() }
+          $in.Close()
+          $resp.Close()
+          # 本块完成：若已到总大小则完成，否则继续下一块（重置尝试计数）
+          if ($total -ne $null -and $offset -ge $total) { return }
+          break
+        } else {
+          # 服务器不支持 Range（返回 200 完整文件）：从头单次下载
+          $offset = 0
+          Remove-Item $dest -Force -ErrorAction SilentlyContinue
+          $in = $resp.GetResponseStream()
+          $out = [System.IO.File]::Create($dest)
+          try {
+            $buf = New-Object byte[] 262144
+            while (($read = $in.Read($buf, 0, $buf.Length)) -gt 0) { $out.Write($buf, 0, $read) }
+          } finally { $out.Close() }
+          $in.Close()
+          $resp.Close()
+          return
+        }
+      } catch {
+        if ($resp) { try { $resp.Close() } catch {} }
+        if ($attempt -ge $maxAttempts) { throw }
+        Start-Sleep -Milliseconds 1000
       }
-    } finally { $out.Close() }
-  } finally { $resp.Close() }
+    }
+  }
 }
 
 # ---------- unzip (Expand-Archive fallback for PS 3+) ----------
