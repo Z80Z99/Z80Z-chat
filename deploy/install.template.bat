@@ -448,8 +448,10 @@ function Get-Sha256([string]$path) {
 # - 显式 TLS 1.2（PS 5.1 默认可能回退 TLS1.0）
 # - 分块下载（4MB/请求），单块失败仅重传该块（断点续传），不从头再来
 # - 服务器不支持 Range（返回 200 而非 206）时回退单次完整下载
+# - 失败时写诊断日志（download-error.log），区分连接重置/超时/代理等真实原因
 function Download-File([string]$url, [string]$dest) {
   try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
+  $logPath = Join-Path (Split-Path $dest -Parent) 'download-error.log'
   $chunkSize = 4 * 1024 * 1024
   $maxAttempts = 8
   # 已下载大小（支持断点续传：失败重试时从已有字节继续）
@@ -505,7 +507,16 @@ function Download-File([string]$url, [string]$dest) {
         }
       } catch {
         if ($resp) { try { $resp.Close() } catch {} }
-        if ($attempt -ge $maxAttempts) { throw }
+        # 记录真实异常（连接重置/超时/代理/杀软中断等），供诊断
+        $status = ''
+        try { if ($_.Exception -is [System.Net.WebException]) { $status = [string]$_.Exception.Status } } catch {}
+        $inner = ''
+        try { if ($_.Exception.InnerException) { $inner = ' INNER=' + $_.Exception.InnerException.Message } } catch {}
+        try {
+          $logLine = ('{0} | url={1} | offset={2} | status={3} | err={4}{5}' -f (Get-Date -Format 'HH:mm:ss'), $url, $offset, $status, $_.Exception.Message, $inner)
+          [System.IO.File]::AppendAllText($logPath, $logLine + [Environment]::NewLine)
+        } catch {}
+        if ($attempt -ge $maxAttempts) { throw ('下载失败: ' + $status + ' ' + $_.Exception.Message) }
         Start-Sleep -Milliseconds 1000
       }
     }
@@ -624,64 +635,90 @@ function Ensure-NodeJs($cfg) {
   $arch = $env:PROCESSOR_ARCHITECTURE
   $osName = 'win-x64'
   if ($arch -eq 'ARM64') { $osName = 'win-arm64' }
-  $file = 'node-' + $ver + '-' + $osName + '.zip'
-  $zipUrl = $script:selLine['node'] + '/v' + $ver + '/' + $file
-  $zip = Join-Path $Root $file
-  $shasumsUrl = $script:selLine['node'] + '/v' + $ver + '/SHASUMS256.txt'
+  # 主版本尝试链：配置的版本失败时自动回退到更稳定的 LTS 主版本（22→20→18）
+  $majorList = @([string]$cfg['nodeVersion'])
+  foreach ($fb in @('20', '18')) { if ($majorList -notcontains $fb) { $majorList += $fb } }
+  Ln ''
+  $zip = Join-Path $Root 'node.zip'
   $shasums = Join-Path $Root '.node-shasums.txt'
-  Ln ''
-  Progress ('正在下载 ' + $file + '（' + $script:selLine['name'] + '，网络较慢时可能需要数分钟）...')
-  Ln ''
-  try {
-    Hint '  下载 SHA256 校验文件...'
+  $dlDone = $false
+  $dlFile = ''
+  foreach ($tryMajor in $majorList) {
+    $ver = Get-NodeVersion $script:selLine['node'] $tryMajor
+    if ($null -eq $ver) {
+      Bad ('无法从 ' + $script:selLine['name'] + ' 获取 Node.js v' + $tryMajor + ' 版本列表（index.json 下载失败）')
+      Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
+      continue
+    }
+    $file = 'node-v' + $ver + '-' + $osName + '.zip'
+    $zipUrl = $script:selLine['node'] + '/v' + $ver + '/' + $file
+    $shasumsUrl = $script:selLine['node'] + '/v' + $ver + '/SHASUMS256.txt'
+    Progress ('正在下载 Node.js v' + $ver + '（' + $script:selLine['name'] + '，网络较慢时可能需要数分钟）...')
+    Ln ''
     try {
-      # 小文件同样可能因网络波动失败：重试 2 次
-      $shasumsOk = $false
-      for ($attempt = 1; $attempt -le 2 -and -not $shasumsOk; $attempt++) {
+      Hint '  下载 SHA256 校验文件...'
+      try {
+        $shasumsOk = $false
+        for ($attempt = 1; $attempt -le 2 -and -not $shasumsOk; $attempt++) {
+          try {
+            Download-File $shasumsUrl $shasums
+            $shasumsOk = $true
+          } catch {
+            Remove-Item $shasums -Force -ErrorAction SilentlyContinue
+            if ($attempt -lt 2) { Start-Sleep -Seconds 1 }
+          }
+        }
+        if (-not $shasumsOk) { throw 'shasums 下载失败' }
+      } catch {
+        if ($_.Exception.Message -match '404|(The remote server returned an error)') {
+          Bad ('该镜像（' + $script:selLine['name'] + '）可能尚未同步此版本（v' + $tryMajor + '），尝试其他版本/线路')
+        } else {
+          Bad ('SHA256 校验文件下载失败：' + $_.Exception.Message)
+          Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
+        }
+        Remove-Item $shasums -Force -ErrorAction SilentlyContinue
+        continue
+      }
+      Hint '  下载 Node.js...'
+      $zipOk = $false
+      for ($attempt = 1; $attempt -le 3 -and -not $zipOk; $attempt++) {
         try {
-          Download-File $shasumsUrl $shasums
-          $shasumsOk = $true
+          Download-File $zipUrl $zip
+          $zipOk = $true
         } catch {
-          Remove-Item $shasums -Force -ErrorAction SilentlyContinue
-          if ($attempt -lt 2) { Start-Sleep -Seconds 1 }
+          Remove-Item $zip -Force -ErrorAction SilentlyContinue
+          if ($attempt -lt 3) {
+            Hint ('  下载中断（第 ' + $attempt + ' 次），2 秒后自动重试...')
+            Start-Sleep -Seconds 2
+          }
         }
       }
-      if (-not $shasumsOk) { throw 'shasums 下载失败' }
-    } catch {
-      # 404（该镜像此版本未同步）与网络中断是不同问题，给出明确指引
-      if ($_.Exception.Message -match '404|(The remote server returned an error)') {
-        Bad ('该镜像（' + $script:selLine['name'] + '）可能尚未同步此版本（' + $ver + '），换一条线路重试')
-      } else {
-        Bad ('SHA256 校验文件下载失败：' + $_.Exception.Message)
-        Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
+      if (-not $zipOk) {
+        throw ('zip 下载失败（' + $tryMajor + ' 系）')
       }
-      Remove-Item $shasums -Force -ErrorAction SilentlyContinue
+      $dlDone = $true
+      $dlFile = $file
+      break
+    } catch {
+      Bad ('Node.js v' + $tryMajor + ' 下载失败：' + $_.Exception.Message)
+      Hint ('  详细原因已记录到 ' + (Join-Path $Root 'download-error.log') + '，请把该文件内容发给我排查')
+      Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
+      Ln ''
+      # 还有回退版本则继续尝试，否则退出
+      if ($tryMajor -ne $majorList[$majorList.Count - 1]) {
+        Hint ('  自动尝试更稳定的 LTS 版本...')
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        Remove-Item $shasums -Force -ErrorAction SilentlyContinue
+        Ln ''
+        continue
+      }
       Separator
       Ln ''
       Read-Host '  按回车重新选择线路下载'
       return $false
     }
-    Hint '  下载 Node.js...'
-    # zip 较大（约 35MB），网络波动可能中途断连：自动重试最多 3 次
-    $zipOk = $false
-    for ($attempt = 1; $attempt -le 3 -and -not $zipOk; $attempt++) {
-      try {
-        Download-File $zipUrl $zip
-        $zipOk = $true
-      } catch {
-        Remove-Item $zip -Force -ErrorAction SilentlyContinue
-        if ($attempt -lt 3) {
-          Hint ('  下载中断（第 ' + $attempt + ' 次），2 秒后自动重试...')
-          Start-Sleep -Seconds 2
-        }
-      }
-    }
-    if (-not $zipOk) { throw 'zip 下载失败（已重试 3 次）' }
-  } catch {
-    Bad 'Node.js 压缩包下载失败（网络中断或代理异常）'
-    Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
-    Remove-Item $zip -Force -ErrorAction SilentlyContinue
-    Remove-Item $shasums -Force -ErrorAction SilentlyContinue
+  }
+  if (-not $dlDone) {
     Separator
     Ln ''
     Read-Host '  按回车重新选择线路下载'
@@ -694,7 +731,7 @@ function Ensure-NodeJs($cfg) {
   if (Test-Path $shasums) {
     foreach ($l in [System.IO.File]::ReadAllLines($shasums, [System.Text.Encoding]::UTF8)) {
       $p = $l.Trim()
-      if ($p.EndsWith($file)) { $expected = ($p -split '\s+')[0]; break }
+      if ($p.EndsWith($dlFile)) { $expected = ($p -split '\s+')[0]; break }
     }
   }
   if ($expected -eq '' -or $actual -ne $expected) {
