@@ -967,21 +967,43 @@ function Write-Project($projDir, [bool]$keepConfig = $false) {
 function Invoke-NpmInstall($projDir, $cfg) {
   $registry = $cfg['npmRegistry']
   if ($registry -eq '') { $registry = 'https://registry.npmmirror.com' }
-  Push-Location $projDir
-  try {
-    Progress '安装依赖（npm install，可能需要几分钟）...'
-    if ($script:useSystemNode) {
-      cmd /c ('npm install --registry=' + $registry)
-    } else {
-      $npm = Join-Path $NodeDir 'npm.cmd'
-      if (Test-Path $npm) {
-        cmd /c ('"' + $npm + '" install --registry=' + $registry)
+  # 网络波动时 npm 下载依赖可能中断：失败自动重试最多 3 次
+  $npmLog = Join-Path $Root 'npm-install.log'
+  $lastOut = ''
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    Push-Location $projDir
+    try {
+      Progress ('安装依赖（npm install，第 ' + $attempt + ' 次尝试，可能需要几分钟）...')
+      $outFile = Join-Path $Root ('.npm-out-' + $attempt + '.txt')
+      if ($script:useSystemNode) {
+        cmd /c ('npm install --registry=' + $registry) > $outFile 2>&1
       } else {
-        & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') install '--registry=' + $registry
+        $npm = Join-Path $NodeDir 'npm.cmd'
+        if (Test-Path $npm) {
+          cmd /c ('"' + $npm + '" install --registry=' + $registry) > $outFile 2>&1
+        } else {
+          & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') install '--registry=' + $registry > $outFile 2>&1
+        }
       }
-    }
-    if ($LASTEXITCODE -ne 0) { throw 'npm install 失败（退出码 ' + $LASTEXITCODE + '）' }
-  } finally { Pop-Location }
+      $code = $LASTEXITCODE
+      if (Test-Path $outFile) { $lastOut = [System.IO.File]::ReadAllText($outFile) }
+      if ($code -eq 0) { return }
+      # 失败：记录日志，重试前清理可能的半成品
+      if (Test-Path (Join-Path $projDir 'node_modules')) {
+        # 不删除 node_modules（部分包已装好，重试可复用），仅清理锁/缓存
+      }
+      Write-Output '' | Out-Null
+      if ($attempt -lt 3) {
+        Hint ('  npm install 失败（退出码 ' + $code + '），3 秒后自动重试...')
+        Start-Sleep -Seconds 3
+      }
+    } finally { Pop-Location }
+  }
+  # 全部失败：输出真实错误尾部帮助诊断
+  $tail = ($lastOut -split "`r?`n") | Select-Object -Last 15
+  $detail = $tail -join "`n"
+  try { [System.IO.File]::WriteAllText($npmLog, $lastOut) } catch {}
+  throw ('npm install 失败（已重试 3 次）' + [Environment]::NewLine + $detail + [Environment]::NewLine + '完整日志：' + $npmLog)
 }
 
 function Invoke-NpmBuild($projDir) {
