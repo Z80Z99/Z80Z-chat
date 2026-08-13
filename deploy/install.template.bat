@@ -450,8 +450,8 @@ function Download-File([string]$url, [string]$dest) {
   try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
   $req = [System.Net.HttpWebRequest]::Create($url)
   $req.Method = 'GET'
-  $req.Timeout = 60000
-  $req.ReadWriteTimeout = 60000
+  $req.Timeout = 120000
+  $req.ReadWriteTimeout = 120000
   $req.Proxy = $null
   $resp = $req.GetResponse()
   try {
@@ -589,7 +589,18 @@ function Ensure-NodeJs($cfg) {
   try {
     Hint '  下载 SHA256 校验文件...'
     try {
-      Download-File $shasumsUrl $shasums
+      # 小文件同样可能因网络波动失败：重试 2 次
+      $shasumsOk = $false
+      for ($attempt = 1; $attempt -le 2 -and -not $shasumsOk; $attempt++) {
+        try {
+          Download-File $shasumsUrl $shasums
+          $shasumsOk = $true
+        } catch {
+          Remove-Item $shasums -Force -ErrorAction SilentlyContinue
+          if ($attempt -lt 2) { Start-Sleep -Seconds 1 }
+        }
+      }
+      if (-not $shasumsOk) { throw 'shasums 下载失败' }
     } catch {
       # 404（该镜像此版本未同步）与网络中断是不同问题，给出明确指引
       if ($_.Exception.Message -match '404|(The remote server returned an error)') {
@@ -605,7 +616,21 @@ function Ensure-NodeJs($cfg) {
       return $false
     }
     Hint '  下载 Node.js...'
-    Download-File $zipUrl $zip
+    # zip 较大（约 35MB），网络波动可能中途断连：自动重试最多 3 次
+    $zipOk = $false
+    for ($attempt = 1; $attempt -le 3 -and -not $zipOk; $attempt++) {
+      try {
+        Download-File $zipUrl $zip
+        $zipOk = $true
+      } catch {
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        if ($attempt -lt 3) {
+          Hint ('  下载中断（第 ' + $attempt + ' 次），2 秒后自动重试...')
+          Start-Sleep -Seconds 2
+        }
+      }
+    }
+    if (-not $zipOk) { throw 'zip 下载失败（已重试 3 次）' }
   } catch {
     Bad 'Node.js 压缩包下载失败（网络中断或代理异常）'
     Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
