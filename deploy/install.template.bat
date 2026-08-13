@@ -56,6 +56,7 @@ goto :RUN
 
 
 
+
 __NODECHAT_PS_BEGIN__
 # ============================================================
 # Z80Z-chat single-file bootstrap (extracted by build script into
@@ -334,19 +335,25 @@ $LINES = @(
 )
 
 function Test-Lines {
+  try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
   $results = @()
   foreach ($line in $LINES) {
     $ms = 99999
-    try {
-      $req = [System.Net.HttpWebRequest]::Create($line['node'] + '/index.json')
-      $req.Method = 'HEAD'
-      $req.Timeout = 8000
-      $sw = [System.Diagnostics.Stopwatch]::StartNew()
-      $resp = $req.GetResponse()
-      $sw.Stop()
-      $ms = $sw.ElapsedMilliseconds
-      $resp.Close()
-    } catch { $ms = 99999 }
+    # 测速目标与下载目标对齐（SHASUMS256.txt）：HEAD 通过才代表该线路真的可下载
+    $testUrl = $line['node'] + '/v22/SHASUMS256.txt'
+    for ($try = 0; $try -lt 2 -and $ms -eq 99999; $try++) {
+      try {
+        $req = [System.Net.HttpWebRequest]::Create($testUrl)
+        $req.Method = 'HEAD'
+        $req.Timeout = 8000
+        $req.Proxy = $null
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $resp = $req.GetResponse()
+        $sw.Stop()
+        $ms = $sw.ElapsedMilliseconds
+        $resp.Close()
+      } catch { $ms = 99999 }
+    }
     $r = @{ name = $line['name']; node = $line['node']; npm = $line['npm']; ms = $ms }
     $results += $r
   }
@@ -361,6 +368,16 @@ function Choose-Line([string]$purpose) {
   Ln '  正在测速（延迟越低越好）...'
   Ln ''
   $lines = Test-Lines
+  # 全线路不可达时明确提示（网络/代理/防火墙问题），不进入选择
+  $reachable = @($lines | Where-Object { $_['ms'] -lt 99999 })
+  if ($reachable.Count -eq 0) {
+    Warn '所有线路测速均失败：请检查网络连接，或关闭代理软件（v2ray/Clash 等）的系统代理后重试'
+    Ln ''
+    Separator
+    Ln ''
+    Read-Host '  按回车重新测速'
+    return $null
+  }
   $i = 1
   foreach ($l in $lines) {
     $t = '超时'
@@ -394,7 +411,12 @@ function Choose-Line([string]$purpose) {
 # ---------- latest Node.js version for the configured major ----------
 function Get-NodeVersion([string]$mirror, [string]$major) {
   try {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+  } catch {}
+  try {
     $wc = New-Object System.Net.WebClient
+    $wc.Proxy = $null
+    $wc.Timeout = 30000
     $txt = $wc.DownloadString($mirror + '/index.json')
     $list = ConvertFrom-JsonCompat $txt
     foreach ($item in $list) {
@@ -415,10 +437,28 @@ function Get-Sha256([string]$path) {
   return $sb.ToString()
 }
 
-# ---------- download ----------
+# ---------- download (no proxy, TLS1.2, timeout via HttpWebRequest) ----------
 function Download-File([string]$url, [string]$dest) {
-  $wc = New-Object System.Net.WebClient
-  $wc.DownloadFile($url, $dest)
+  # 绕过系统代理（WebClient 默认继承 IE 代理设置，用户开代理软件时会导致全线下载失败）
+  # 显式 TLS 1.2（PS 5.1 SystemDefault 可能回退到 TLS1.0 被服务器拒绝）
+  # 用 HttpWebRequest + 流式写出：支持超时（WebClient.DownloadFile 无法设置超时，可能无限挂起）
+  try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
+  $req = [System.Net.HttpWebRequest]::Create($url)
+  $req.Method = 'GET'
+  $req.Timeout = 60000
+  $req.ReadWriteTimeout = 60000
+  $req.Proxy = $null
+  $resp = $req.GetResponse()
+  try {
+    $in = $resp.GetResponseStream()
+    $out = [System.IO.File]::Create($dest)
+    try {
+      $buf = New-Object byte[] 65536
+      while (($read = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+        $out.Write($buf, 0, $read)
+      }
+    } finally { $out.Close() }
+  } finally { $resp.Close() }
 }
 
 # ---------- unzip (Expand-Archive fallback for PS 3+) ----------
@@ -518,6 +558,7 @@ function Ensure-NodeJs($cfg) {
   if ($ch -ne '1') { Self-Clean; exit 0 }
 
   $script:selLine = Choose-Line ('Node.js 运行时（约 25MB）')
+  if ($null -eq $script:selLine) { return $false }
 
   $ver = Get-NodeVersion $script:selLine['node'] $cfg['nodeVersion']
   $arch = $env:PROCESSOR_ARCHITECTURE
@@ -533,11 +574,27 @@ function Ensure-NodeJs($cfg) {
   Ln ''
   try {
     Hint '  下载 SHA256 校验文件...'
-    Download-File $shasumsUrl $shasums
+    try {
+      Download-File $shasumsUrl $shasums
+    } catch {
+      # 404（该镜像此版本未同步）与网络中断是不同问题，给出明确指引
+      if ($_.Exception.Message -match '404|(The remote server returned an error)') {
+        Bad ('该镜像（' + $script:selLine['name'] + '）可能尚未同步此版本（' + $ver + '），换一条线路重试')
+      } else {
+        Bad ('SHA256 校验文件下载失败：' + $_.Exception.Message)
+        Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
+      }
+      Remove-Item $shasums -Force -ErrorAction SilentlyContinue
+      Separator
+      Ln ''
+      Read-Host '  按回车重新选择线路下载'
+      return $false
+    }
     Hint '  下载 Node.js...'
     Download-File $zipUrl $zip
   } catch {
-    Bad '下载失败，请检查网络后重试'
+    Bad 'Node.js 压缩包下载失败（网络中断或代理异常）'
+    Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
     Remove-Item $shasums -Force -ErrorAction SilentlyContinue
     Separator
