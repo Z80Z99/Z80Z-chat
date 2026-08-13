@@ -965,45 +965,53 @@ function Write-Project($projDir, [bool]$keepConfig = $false) {
 
 # ---------- npm install / build (system node or bundled nodejs) ----------
 function Invoke-NpmInstall($projDir, $cfg) {
-  $registry = $cfg['npmRegistry']
-  if ($registry -eq '') { $registry = 'https://registry.npmmirror.com' }
-  # 网络波动时 npm 下载依赖可能中断：失败自动重试最多 3 次
+  # registry 候选链：当前线路 → npmmirror → npm 官方（自动切换，避免单源故障）
+  $registryList = @()
+  $cur = $cfg['npmRegistry']
+  if ($cur -eq '') { $cur = 'https://registry.npmmirror.com' }
+  foreach ($r in @($cur, 'https://registry.npmmirror.com', 'https://registry.npmjs.org/')) {
+    if ($registryList -notcontains $r) { $registryList += $r }
+  }
   $npmLog = Join-Path $Root 'npm-install.log'
   $lastOut = ''
-  for ($attempt = 1; $attempt -le 3; $attempt++) {
-    Push-Location $projDir
-    try {
-      Progress ('安装依赖（npm install，第 ' + $attempt + ' 次尝试，可能需要几分钟）...')
-      $outFile = Join-Path $Root ('.npm-out-' + $attempt + '.txt')
-      if ($script:useSystemNode) {
-        cmd /c ('npm install --registry=' + $registry) > $outFile 2>&1
-      } else {
-        $npm = Join-Path $NodeDir 'npm.cmd'
-        if (Test-Path $npm) {
-          cmd /c ('"' + $npm + '" install --registry=' + $registry) > $outFile 2>&1
+  $lastReg = ''
+  foreach ($registry in $registryList) {
+    $regName = $registry -replace '^https?://([^/]+).*', '$1'
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+      Push-Location $projDir
+      try {
+        Progress ('安装依赖（npm install，源 ' + $regName + '，第 ' + $attempt + ' 次，可能需要几分钟）...')
+        $outFile = Join-Path $Root ('.npm-out-' + $regName + '-' + $attempt + '.txt')
+        if ($script:useSystemNode) {
+          cmd /c ('npm install --registry=' + $registry) > $outFile 2>&1
         } else {
-          & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') install '--registry=' + $registry > $outFile 2>&1
+          $npm = Join-Path $NodeDir 'npm.cmd'
+          if (Test-Path $npm) {
+            cmd /c ('"' + $npm + '" install --registry=' + $registry) > $outFile 2>&1
+          } else {
+            & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') install '--registry=' + $registry > $outFile 2>&1
+          }
         }
-      }
-      $code = $LASTEXITCODE
-      if (Test-Path $outFile) { $lastOut = [System.IO.File]::ReadAllText($outFile) }
-      if ($code -eq 0) { return }
-      # 失败：记录日志，重试前清理可能的半成品
-      if (Test-Path (Join-Path $projDir 'node_modules')) {
-        # 不删除 node_modules（部分包已装好，重试可复用），仅清理锁/缓存
-      }
-      Write-Output '' | Out-Null
-      if ($attempt -lt 3) {
-        Hint ('  npm install 失败（退出码 ' + $code + '），3 秒后自动重试...')
-        Start-Sleep -Seconds 3
-      }
-    } finally { Pop-Location }
+        $code = $LASTEXITCODE
+        if (Test-Path $outFile) { $lastOut = [System.IO.File]::ReadAllText($outFile); $lastReg = $regName }
+        if ($code -eq 0) { return }
+        if ($attempt -lt 2) {
+          Hint ('  ' + $regName + ' 源安装失败（退出码 ' + $code + '），3 秒后自动重试...')
+          Start-Sleep -Seconds 3
+        }
+      } finally { Pop-Location }
+    }
+    # 本 registry 两次都失败，提示并换下一个
+    if ($registry -ne $registryList[$registryList.Count - 1]) {
+      Hint ('  ' + $regName + ' 源失败，自动切换到下一个源...')
+      Ln ''
+    }
   }
   # 全部失败：输出真实错误尾部帮助诊断
   $tail = ($lastOut -split "`r?`n") | Select-Object -Last 15
   $detail = $tail -join "`n"
   try { [System.IO.File]::WriteAllText($npmLog, $lastOut) } catch {}
-  throw ('npm install 失败（已重试 3 次）' + [Environment]::NewLine + $detail + [Environment]::NewLine + '完整日志：' + $npmLog)
+  throw ('npm install 失败（已尝试全部镜像源，最后使用 ' + $lastReg + '）' + [Environment]::NewLine + $detail + [Environment]::NewLine + '完整日志：' + $npmLog)
 }
 
 function Invoke-NpmBuild($projDir) {
