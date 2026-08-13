@@ -334,14 +334,19 @@ $LINES = @(
   @{ name = '中科大';            node = 'https://mirrors.ustc.edu.cn/nodejs-release';  npm = 'https://mirrors.ustc.edu.cn/npm/' }
 )
 
-function Test-Lines {
+function Test-Lines([string]$purpose = 'node') {
   try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
   $results = @()
   foreach ($line in $LINES) {
     $ms = 99999
-    # 测速目标：index.json（各镜像根目录均存在，HEAD 稳定可达）。
-    # 注意：不能用 /v22/SHASUMS256.txt（该路径不存在，SHASUMS 只在具体版本目录里，会全部 404 误判失败）
-    $testUrl = $line['node'] + '/index.json'
+    # 测速目标按用途区分：
+    #  node：index.json（各镜像根目录均存在，HEAD 稳定可达）
+    #  npm ：registry 的 express 包路径（测真实 npm 源可用性）
+    if ($purpose -eq 'npm') {
+      $testUrl = $line['npm'] + 'express'
+    } else {
+      $testUrl = $line['node'] + '/index.json'
+    }
     for ($try = 0; $try -lt 2 -and $ms -eq 99999; $try++) {
       try {
         $req = [System.Net.HttpWebRequest]::Create($testUrl)
@@ -368,7 +373,7 @@ function Choose-Line([string]$purpose) {
   Ln ''
   Ln '  正在测速（延迟越低越好）...'
   Ln ''
-  $lines = Test-Lines
+  $lines = Test-Lines $purpose
   # 全线路不可达时明确提示（网络/代理/防火墙问题），不进入选择
   $reachable = @($lines | Where-Object { $_['ms'] -lt 99999 })
   if ($reachable.Count -eq 0) {
@@ -1167,24 +1172,21 @@ function Install($cfg) {
     if (-not (Ensure-NodeJs $cfg)) { continue }
   }
 
-  if ($script:selLine -eq $null -and $cfg['npmRegistry'] -eq '') {
-    $script:selLine = Choose-Line ('Z80Z-chat 项目依赖包（npm install，约 90MB）')
-  }
-  if ($script:selLine -ne $null) {
-    $cfg['nodeMirror'] = $script:selLine['node']
-    $cfg['npmRegistry'] = $script:selLine['npm']
-  }
+  # npm 镜像源独立选择（与 Node.js 线路选择对称，测速 npm registry）
+  $npmLine = Choose-Line ('Z80Z-chat 项目依赖包（npm install，约 90MB）') 'npm'
+  if ($null -eq $npmLine) { return $false }
+  $cfg['npmRegistry'] = $npmLine['npm']
 
   New-Item -ItemType Directory -Path $projDir -Force | Out-Null
   Ln ''
   Progress '释放项目文件...'
   Write-Project $projDir
   Ask-Port $projDir
-  # 镜像线路写入项目 config.json（此后配置跟随项目，不再需要外层文件）
+  # Node.js 镜像线路（如已选）与 npm 源写入项目 config.json（此后配置跟随项目，不再需要外层文件）
   if ($script:selLine -ne $null) {
     Set-ConfigField $projDir 'nodeMirror' $script:selLine['node']
-    Set-ConfigField $projDir 'npmRegistry' $script:selLine['npm']
   }
+  Set-ConfigField $projDir 'npmRegistry' $cfg['npmRegistry']
   Ln ''
   Invoke-NpmInstall $projDir $cfg
   Ln ''
