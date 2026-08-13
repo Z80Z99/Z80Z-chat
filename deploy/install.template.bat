@@ -339,8 +339,9 @@ function Test-Lines {
   $results = @()
   foreach ($line in $LINES) {
     $ms = 99999
-    # 测速目标与下载目标对齐（SHASUMS256.txt）：HEAD 通过才代表该线路真的可下载
-    $testUrl = $line['node'] + '/v22/SHASUMS256.txt'
+    # 测速目标：index.json（各镜像根目录均存在，HEAD 稳定可达）。
+    # 注意：不能用 /v22/SHASUMS256.txt（该路径不存在，SHASUMS 只在具体版本目录里，会全部 404 误判失败）
+    $testUrl = $line['node'] + '/index.json'
     for ($try = 0; $try -lt 2 -and $ms -eq 99999; $try++) {
       try {
         $req = [System.Net.HttpWebRequest]::Create($testUrl)
@@ -409,6 +410,7 @@ function Choose-Line([string]$purpose) {
 }
 
 # ---------- latest Node.js version for the configured major ----------
+# 注意：WebClient 没有 Timeout 属性（设置会抛异常），失败时返回 $null 由调用方处理
 function Get-NodeVersion([string]$mirror, [string]$major) {
   try {
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
@@ -416,7 +418,6 @@ function Get-NodeVersion([string]$mirror, [string]$major) {
   try {
     $wc = New-Object System.Net.WebClient
     $wc.Proxy = $null
-    $wc.Timeout = 30000
     $txt = $wc.DownloadString($mirror + '/index.json')
     $list = ConvertFrom-JsonCompat $txt
     foreach ($item in $list) {
@@ -424,7 +425,7 @@ function Get-NodeVersion([string]$mirror, [string]$major) {
       if ($v -like ('v' + $major + '.*')) { return $v }
     }
   } catch {}
-  return ('v' + $major)
+  return $null
 }
 
 # ---------- SHA256 ----------
@@ -561,6 +562,15 @@ function Ensure-NodeJs($cfg) {
   if ($null -eq $script:selLine) { return $false }
 
   $ver = Get-NodeVersion $script:selLine['node'] $cfg['nodeVersion']
+  if ($null -eq $ver) {
+    Bad ('无法从 ' + $script:selLine['name'] + ' 获取 Node.js 版本列表（index.json 下载失败）')
+    Hint '  若你开启了代理软件（v2ray/Clash 等），请先关闭「系统代理」再重试'
+    Ln ''
+    Separator
+    Ln ''
+    Read-Host '  按回车重新选择线路下载'
+    return $false
+  }
   $arch = $env:PROCESSOR_ARCHITECTURE
   $osName = 'win-x64'
   if ($arch -eq 'ARM64') { $osName = 'win-arm64' }
