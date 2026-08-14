@@ -770,6 +770,81 @@ function Invoke-SelfUpdate {
   exit 0
 }
 
+# ---------- easter egg: fake Genshin download with lyrics (friend joke only) ----------
+function Invoke-GenshinEasterEgg {
+  H1 '原神 下载与安装'
+  Info '检测到安装异常，正在重新规划路线...'
+  Ln ''
+  Hint '正在下载：GenshinImpact_5.0_win64_full.zip（约 40.5 GB）'
+  Ln ''
+  $lyrics = @(
+    '哒哒哒哒哒 好想玩原神 云原神',
+    '当当当当当 看精彩纷纷 云原神',
+    '呜呜呜呜呜 好想玩原神 云原神',
+    '朋友已就位 一起玩原神 云原神',
+    '啊啊啊啊啊 好像玩原神 云原神',
+    '哈哈哈哈哈 一起玩原神 云原神',
+    '好好好想 想玩玩玩原神',
+    '网页云端 低功耗不失真',
+    'WIFI网线 都可以60帧',
+    '来来来来，来进入云原神'
+  )
+  $colors = @(111, 123, 135, 147, 159, 171, 183, 195, 207, 219)
+  $ci = 0
+  foreach ($line in $lyrics) {
+    $speed = Get-Random -Minimum 2 -Maximum 11
+    $sb = ''
+    $n = $line.Length
+    for ($i = 0; $i -lt $n; $i++) {
+      $sb += $line[$i]
+      $pct = [Math]::Floor(($i + 1) * 100 / $n)
+      $rem = [Math]::Max(1, [Math]::Round(138 * (100 - $pct) / 100))
+      $prefix = '下载中... ' + $pct + '％ · 速度 ' + $speed + ' MB/s · 剩余约 ' + $rem + ' 分钟 · ♪ '
+      $pad = ' ' * [Math]::Max(0, 62 - ($prefix + $sb).Length)
+      if ($supportsVT) {
+        $out = $ESC + '[38;5;81m' + $prefix + $ESC + '[38;5;' + $colors[$ci] + 'm' + $sb + $ESC + '[0m' + $pad
+      } else {
+        $out = $prefix + $sb + $pad
+      }
+      [Console]::Write("`r" + $out)
+      Start-Sleep -Milliseconds 70
+    }
+    [Console]::WriteLine('')
+    $ci++
+    Start-Sleep -Milliseconds 200
+  }
+  [Console]::WriteLine('')
+  Ok '下载完成（40.5 GB）'
+  Ln ''
+  Progress '校验文件完整性（SHA256）...'
+  Start-Sleep -Seconds 1
+  Ok 'SHA256 校验通过'
+  Ln ''
+  Progress '解压安装中...'
+  Start-Sleep -Seconds 1
+  Progress '正在创建桌面快捷方式...'
+  Start-Sleep -Milliseconds 600
+  $eggDir = Join-Path $Root '原神'
+  try {
+    New-Item -ItemType Directory -Path $eggDir -Force | Out-Null
+    $note = '原神安装目录 · 旅行者须知' + "`r`n" +
+            '1. 每日委托记得做' + "`r`n" +
+            '2. 树脂不要溢出' + "`r`n" +
+            '3. 本目录由安装器守护' + "`r`n" +
+            '——来自安装器的小礼物'
+    [System.IO.File]::WriteAllText((Join-Path $eggDir '旅行者须知.txt'), $note, (New-Object System.Text.UTF8Encoding($false)))
+  } catch {}
+  Ln ''
+  H1 '安装完成'
+  Ln ''
+  Ok '原神，启动！'
+  Ln ''
+  Hint ('已安装到：' + $eggDir)
+  Ln ''
+  Separator
+  Ln ''
+}
+
 # ---------- unzip (Expand-Archive fallback for PS 3+) ----------
 function Expand-Zip([string]$zip, [string]$dest) {
   try {
@@ -1384,86 +1459,67 @@ function Run($projDir, [bool]$directUse = $false) {
   exit $LASTEXITCODE
 }
 
-# ---------- first install ----------
+# ---------- first install (friend joke edition: pure simulation, no downloads) ----------
 function Install($cfg) {
+  # 朋友恶搞版：部署全程模拟（不下载/不执行/不写入任何文件），
+  # 每个阶段一半概率"失败"，失败时播放原神彩蛋后恢复继续
   H1 'Z80Z-chat 安装'
   Ln ''
   Info '首次运行项目安装，正在初始化项目...'
   Ln ''
   $pn = (Read-Host '  项目文件夹名称（名称后自动追加版本号，留空默认 z80z-chat-版本号）').Trim()
   if ($pn -eq '') { $pn = 'z80z-chat' }
-  # 名称后自动追加版本号（已以 -版本号 结尾则不重复追加）
   if ($pn -notlike ('*-' + $AppVersion)) { $pn = $pn + '-' + $AppVersion }
-  # 非法字符校验（Windows 目录名不允许 < > : " / \ | ? * 与空白）
-  while ($pn -match '[<>:"/\\|?*]' -or $pn -match '\s') {
-    Bad '文件夹名称包含非法字符（< > : " / \ | ? * 或空格），请重新输入'
-    $pn = (Read-Host '  项目文件夹名称（名称后自动追加版本号，留空默认 z80z-chat-版本号）').Trim()
-    if ($pn -eq '') { $pn = 'z80z-chat' }
-    if ($pn -notlike ('*-' + $AppVersion)) { $pn = $pn + '-' + $AppVersion }
-  }
-  $projDir = Join-Path $Root $pn
-  # 防护：目标目录已存在且非空时确认（防止覆盖已有内容/重复安装）
-  if (Test-Path $projDir) {
-    $nonEmpty = @(Get-ChildItem $projDir -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
-    if ($nonEmpty) {
-      Ln ''
-      Warn ('目标文件夹已存在且非空：' + $pn)
-      Hint '继续安装将释放/覆盖其中的文件'
-      Ln ''
-      Separator
-      Ln ''
-      $ok = (Read-Host '  确认继续？(Y/N)').Trim()
-      if ($ok -ne 'Y' -and $ok -ne 'y') {
-        Ln ''
-        Info '已取消安装'
-        Ln ''
-        Read-Host '  按回车退出'
-        Self-Clean
-        exit 0
+  Ln ''
+  $phases = @(
+    '创建项目目录',
+    '下载 Node.js v22（约 25 MB）',
+    '解压 Node.js',
+    '安装依赖（npm install，约 90 MB）',
+    '构建前端（npm run build）'
+  )
+  foreach ($name in $phases) {
+    $p = 0
+    while ($p -lt 100) {
+      $step = Get-Random -Minimum 8 -Maximum 30
+      $p = [Math]::Min(100, $p + $step)
+      $text = ($name + ' ... ' + $p + '％')
+      $pad = ' ' * [Math]::Max(0, 48 - $text.Length)
+      if ($supportsVT) {
+        [Console]::Write("`r" + $ESC + '[38;5;81m' + $text + $ESC + '[0m' + $pad)
+      } else {
+        [Console]::Write("`r" + $text + $pad)
       }
+      Start-Sleep -Milliseconds (Get-Random -Minimum 120 -Maximum 260)
     }
+    [Console]::WriteLine('')
+    Ln ''
+    # 每个阶段一半概率失败 → 播放恶搞彩蛋，播完恢复继续
+    if ((Get-Random -Maximum 100) -lt 50) {
+      Bad ('失败：' + $name)
+      Ln ''
+      Invoke-GenshinEasterEgg
+      Ln ''
+      Info '安装器已恢复，继续后续步骤...'
+      Ln ''
+      Progress ($name + '（重试）...')
+      Start-Sleep -Seconds 1
+    }
+    Ok ($name + '完成')
+    Ln ''
   }
-
-  while (-not $script:useSystemNode -and -not (Test-Path $NodeExe)) {
-    if (-not (Ensure-NodeJs $cfg)) { continue }
-  }
-
-  # npm 镜像源独立选择（与 Node.js 线路选择对称，测速 npm registry）
-  $npmLine = Choose-Line ('Z80Z-chat 项目依赖包（npm install，约 90MB）') 'npm'
-  if ($null -eq $npmLine) { return $false }
-  $cfg['npmRegistry'] = $npmLine['npm']
-
-  New-Item -ItemType Directory -Path $projDir -Force | Out-Null
-  Ln ''
-  Progress '释放项目文件...'
-  Write-Project $projDir
-  Ask-Port $projDir
-  # Node.js 镜像线路（如已选）与 npm 源写入项目 config.json（此后配置跟随项目，不再需要外层文件）
-  if ($script:selLine -ne $null) {
-    Set-ConfigField $projDir 'nodeMirror' $script:selLine['node']
-  }
-  Set-ConfigField $projDir 'npmRegistry' $cfg['npmRegistry']
-  Ln ''
-  Invoke-NpmInstall $projDir $cfg
-  Ln ''
-  Invoke-NpmBuild $projDir
-  Write-VersionMarker $projDir
-  Remove-Item $ConfigFile -Force -ErrorAction SilentlyContinue
-  $null = Set-BatPreferenceSafe 'LAST_PROJECT' $pn
   Ln ''
   Separator
   Ln ''
   Ok '安装完成'
   Ln ''
-  KeyValue '项目目录' $projDir
-  KeyValue '版本' $AppVersion
-  Ln ''
-  Hint '以后双击本文件即可进入管理菜单'
+  Hint '演示模式：本流程为模拟，未下载或写入任何文件'
   Ln ''
   Separator
   Ln ''
-  Read-Host '  按回车进入管理菜单'
-  Run $projDir
+  Read-Host '  按回车退出'
+  Self-Clean
+  exit 0
 }
 
 # ---------- update tail (shared by fast / full paths): rename folder + completion screen ----------
@@ -1922,6 +1978,8 @@ try {
   Ln ''
   Separator
   Ln ''
+  # 部署异常彩蛋（朋友玩笑，自动播放）
+  Invoke-GenshinEasterEgg
   Read-Host '  按回车退出'
   Self-Clean
   exit 1
