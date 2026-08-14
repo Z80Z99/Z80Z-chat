@@ -1,5 +1,16 @@
 # Changelog
 
+## Z80Z-chat v1.0.3（2026-08-14）
+
+修复多人语音频道只有部分人能通的问题（跨网络打洞失败 + 信令健壮性）。
+
+### 修复
+
+- **增加 TURN 中继兜底**：`iceServers` 在 Google STUN 之外增加公共免费 TURN（Metered OpenRelay），跨网络（对称 NAT/运营商级 NAT/移动热点）P2P 打洞失败时自动走中继；config.json 附自建 coturn 说明（隧道带不动 TURN，需公网 UDP 端口）
+- **服务端房间注册误删**：用户刷新/重连后旧 ws 关闭会误删新 ws 的房间注册，导致该用户信令收发全断。现在删除前校验 ws 同一性，且不再广播虚假离开事件
+- **新人主动建连 + glare 处理**：新加入者收到成员列表后主动对未连接成员发起 offer，不再只依赖老成员发 offer；按 userId 大小定 polite/impolite，用 perfect-negotiation 规则收敛双方同时 offer 的冲突
+- **ICE candidate 竞态防护**：`setRemoteDescription`/`addIceCandidate` 全程 await + try/catch，远程描述未就绪时到达的 candidate 先缓存、SRD 完成后补加
+
 ## Z80Z-chat v1.0.2（2026-08-14）
 
 安装器环境兼容性修复（针对真实用户机器上报的两个安装失败场景）。

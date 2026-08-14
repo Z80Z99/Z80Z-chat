@@ -19,7 +19,18 @@ const defaults = {
   bodyLimitMB: 50,
   corsOrigins: '*',
   wsPath: '/ws',
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ],
   firewall: { enabled: true, ruleName: 'Z80Z-chat' },
   backupKeep: 3,
   uploadUrlExpiresSec: 604800,

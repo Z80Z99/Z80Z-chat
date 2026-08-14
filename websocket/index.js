@@ -212,24 +212,31 @@ export function handleWebSocket(wss, db) {
 }
 
 function leaveVoiceRoom(wss, ws, user) {
-  if (ws.voiceRoomId) {
-    const room = voiceRooms.get(ws.voiceRoomId)
-    if (room) {
-      room.delete(user.id)
-      if (room.size === 0) {
-        voiceRooms.delete(ws.voiceRoomId)
-        broadcastRoomMembers(wss, ws.voiceRoomId, [])
-      } else {
-        broadcastToRoom(room, ws, JSON.stringify({
-          type: 'voice-user-left',
-          roomId: ws.voiceRoomId,
-          userId: user.id
-        }))
-        broadcastRoomMembers(wss, ws.voiceRoomId, Array.from(room.keys()))
-      }
-    }
+  if (!ws.voiceRoomId) return
+  const room = voiceRooms.get(ws.voiceRoomId)
+  if (!room) {
     ws.voiceRoomId = null
+    return
   }
+  // 只删除"当前注册的 ws"：用户重连/刷新后新 ws 已覆盖 room.set 的注册，
+  // 旧 ws 关闭时不应误删新 ws 的注册，也不应广播虚假的离开事件
+  if (room.get(user.id) !== ws) {
+    ws.voiceRoomId = null
+    return
+  }
+  room.delete(user.id)
+  if (room.size === 0) {
+    voiceRooms.delete(ws.voiceRoomId)
+    broadcastRoomMembers(wss, ws.voiceRoomId, [])
+  } else {
+    broadcastToRoom(room, ws, JSON.stringify({
+      type: 'voice-user-left',
+      roomId: ws.voiceRoomId,
+      userId: user.id
+    }))
+    broadcastRoomMembers(wss, ws.voiceRoomId, Array.from(room.keys()))
+  }
+  ws.voiceRoomId = null
 }
 
 function broadcastRoomMembers(wss, roomId, members) {

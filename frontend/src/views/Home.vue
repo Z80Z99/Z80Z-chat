@@ -205,6 +205,7 @@ function handleVoiceSignal(data: any) {
 function handleVoiceMembers(data: any) {
   if (data.roomId === voiceStore.currentRoom) {
     voiceStore.participants = data.members
+    voiceStore.ensureConnections(data.members)
   }
 }
 

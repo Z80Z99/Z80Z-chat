@@ -106,6 +106,40 @@ test('信令隔离：非房间成员不能向房间内成员发送 voice-offer',
   wsM.close(); wsO.close()
 })
 
+test('重连后旧 ws 关闭不误删新 ws 注册', async () => {
+  const wsM = await wsConnect(member.token)
+  wsM.send(JSON.stringify({ type: 'voice-join', roomId: voiceChannel.id }))
+  await sleep(300)
+
+  // owner 第一个 ws join
+  const ws1 = await wsConnect(owner.token)
+  ws1.send(JSON.stringify({ type: 'voice-join', roomId: voiceChannel.id }))
+  await sleep(300)
+
+  // owner 第二个 ws join（覆盖 room 内的注册）
+  const ws2 = await wsConnect(owner.token)
+  ws2.send(JSON.stringify({ type: 'voice-join', roomId: voiceChannel.id }))
+  await sleep(300)
+
+  // 关闭旧 ws1：不应误删 ws2 的注册
+  ws1.close()
+  await sleep(400)
+
+  // member 向 owner 发 offer，应转发给 ws2
+  let gotOffer = false
+  ws2.on('message', (raw) => {
+    const d = JSON.parse(raw.toString())
+    if (d.type === 'voice-offer') gotOffer = true
+  })
+  wsM.send(JSON.stringify({ type: 'voice-offer', roomId: voiceChannel.id, targetUserId: owner.user.id, data: { sdp: 'x' } }))
+  await sleep(400)
+  assert.equal(gotOffer, true)
+
+  wsM.send(JSON.stringify({ type: 'voice-leave', roomId: voiceChannel.id }))
+  ws2.send(JSON.stringify({ type: 'voice-leave', roomId: voiceChannel.id }))
+  wsM.close(); ws2.close()
+})
+
 test('无 viewChannel 权限的成员 voice-join 被拒绝，owner 豁免', async () => {
   // 等待防抖落盘（读到包含 @everyone 角色的完整数据）
   const db = await waitForDB(d => d.roles.some(r => r.serverId === server.id && r.isDefault))

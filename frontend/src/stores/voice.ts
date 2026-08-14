@@ -13,6 +13,8 @@ export const useVoiceStore = defineStore('voice', () => {
   const isDeafened = ref(false)
   const localStream = ref<MediaStream | null>(null)
   const peerConnections = ref<Map<string, RTCPeerConnection>>(new Map())
+  // 远程描述未就绪时到达的 ICE candidate 缓存，SRD 完成后统一补加
+  const pendingCandidates = new Map<string, RTCIceCandidateInit[]>()
   const micAvailable = ref(true)
   const micError = ref('')
 
@@ -478,6 +480,7 @@ export const useVoiceStore = defineStore('voice', () => {
     }
     peerConnections.value.forEach(pc => pc.close())
     peerConnections.value.clear()
+    pendingCandidates.clear()
     screenSenders.value.clear()
     remoteScreens.value = []
     screenDebug.value = []
@@ -903,23 +906,63 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
 
+  // perfect negotiation：双方同时 offer（glare）时按 userId 大小约定礼貌方，
+  // 礼貌方 rollback 后应答对方 offer，非礼貌方忽略对方 offer（由礼貌方收敛）
+  function isPolite(peerId: string): boolean {
+    return (authStore.user?.id ?? '') < peerId
+  }
+
+  async function flushPendingCandidates(userId: string, pc: RTCPeerConnection) {
+    const pending = pendingCandidates.get(userId) || []
+    pendingCandidates.set(userId, [])
+    for (const cand of pending) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(cand)) } catch {}
+    }
+  }
+
   function handleSignal(data: any) {
     if (!currentRoom.value) return
     const pc = getOrCreatePeerConnection(data.userId)
     switch (data.type) {
-      case 'voice-offer':
-        pc.setRemoteDescription(new RTCSessionDescription(data.data))
-        pc.createAnswer().then(answer => {
-          pc.setLocalDescription(answer)
-          ws.send({ type: 'voice-answer', roomId: currentRoom.value, targetUserId: data.userId, data: answer })
-        })
+      case 'voice-offer': {
+        const polite = isPolite(data.userId)
+        ;(async () => {
+          try {
+            if (pc.signalingState === 'have-local-offer') {
+              if (!polite) return
+              await pc.setLocalDescription({ type: 'rollback' })
+            }
+            await pc.setRemoteDescription(new RTCSessionDescription(data.data))
+            await flushPendingCandidates(data.userId, pc)
+            const answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+            ws.send({ type: 'voice-answer', roomId: currentRoom.value, targetUserId: data.userId, data: answer })
+          } catch {}
+        })()
         break
-      case 'voice-answer':
-        pc.setRemoteDescription(new RTCSessionDescription(data.data))
+      }
+      case 'voice-answer': {
+        ;(async () => {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.data))
+            await flushPendingCandidates(data.userId, pc)
+          } catch {}
+        })()
         break
-      case 'voice-ice-candidate':
-        pc.addIceCandidate(new RTCIceCandidate(data.data))
+      }
+      case 'voice-ice-candidate': {
+        ;(async () => {
+          const cand = new RTCIceCandidate(data.data)
+          if (!pc.remoteDescription) {
+            const arr = pendingCandidates.get(data.userId) || []
+            arr.push(data.data)
+            pendingCandidates.set(data.userId, arr)
+          } else {
+            try { await pc.addIceCandidate(cand) } catch {}
+          }
+        })()
         break
+      }
     }
   }
 
@@ -1017,9 +1060,26 @@ export const useVoiceStore = defineStore('voice', () => {
   async function createOffer(userId: string) {
     if (!currentRoom.value) return
     const pc = getOrCreatePeerConnection(userId)
+    // 协商在途或已建立连接则跳过，避免重复/冲突 offer
+    if (pc.signalingState !== 'stable') return
+    if (pc.connectionState === 'connected' && pc.remoteDescription) return
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     ws.send({ type: 'voice-offer', roomId: currentRoom.value, targetUserId: userId, data: offer })
+  }
+
+  // 新加入者收到成员列表后，主动对尚未建立连接的成员发起 offer，
+  // 避免完全依赖"老成员收到 voice-user-joined 才建连"的单一路径
+  function ensureConnections(members: string[]) {
+    if (!currentRoom.value) return
+    const me = authStore.user?.id
+    for (const uid of members) {
+      if (!uid || uid === me) continue
+      const pc = peerConnections.value.get(uid)
+      const connected = !!pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting') && !!pc.remoteDescription
+      if (connected) continue
+      createOffer(uid)
+    }
   }
 
   function cleanupRemoteScreen(userId: string) {
@@ -1101,6 +1161,7 @@ export const useVoiceStore = defineStore('voice', () => {
   async function rejoinRoom(roomId: string) {
     peerConnections.value.forEach(pc => pc.close())
     peerConnections.value.clear()
+    pendingCandidates.clear()
     screenSenders.value.clear()
     remoteScreens.value = []
     outputAnalysers.forEach(({ src }) => src.disconnect())
@@ -1127,7 +1188,7 @@ export const useVoiceStore = defineStore('voice', () => {
     startScreenShare, changeShareQuality, stopScreenShare, switchScreenSource,
     refreshDevices, changeInputDevice, changeOutputDevice, setInputVolume, setOutputVolume,
     playTestSound, playSystemTone,
-    handleSignal, createOffer, cleanupRemoteScreen, handleVoiceRoomMembers, requestScreenRefresh,
+    handleSignal, createOffer, ensureConnections, cleanupRemoteScreen, handleVoiceRoomMembers, requestScreenRefresh,
     saveVoiceState, loadVoiceState, clearVoiceState, rejoinRoom
   }
 })
