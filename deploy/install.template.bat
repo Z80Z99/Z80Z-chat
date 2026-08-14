@@ -789,37 +789,73 @@ function Invoke-GenshinEasterEgg {
     'WIFI网线 都可以60帧',
     '来来来来，来进入云原神'
   )
-  # 歌词展平为字符流（含换行分隔），进度条按字符推进，逐字卡拉OK
+  # 歌词展平为字符流（含换行分隔），循环播放
   $chars = @()
   foreach ($l in $lyrics) {
     foreach ($ch in $l.ToCharArray()) { $chars += $ch }
     $chars += "`n"
   }
-  $colors = @(111, 123, 135, 147, 159, 171, 183, 195, 207, 219)
   $totalMB = 41472
   $total = $chars.Count
+  $rainbow = @(196, 208, 220, 118, 51, 39)
+  # 10 分钟 = 3000 tick × 200ms；进度条 300 步（每 10 tick 推进 1 步）
+  $totalTicks = 3000
+  $steps = 300
+  $tickCount = 0
+  $step = 0
+  $charIdx = 0
   $sb = ''
-  $ci = 0
-  for ($i = 0; $i -lt $total; $i++) {
-    $ch = $chars[$i]
-    if ($ch -eq "`n") { $sb = ''; $ci++ } else { $sb += $ch }
-    $pct = [Math]::Floor($i * 100 / $total)
-    # 5-10 MB/s 随机波动，剩余时间按剩余字节/当前速度真实计算（40.5 GB 总量）
-    $speed = Get-Random -Minimum 5 -Maximum 11
-    $remMin = [Math]::Max(1, [Math]::Round($totalMB * (100 - $pct) / 100 / $speed / 60))
-    $filled = [Math]::Floor($pct * 15 / 100)
-    $bar = '[' + ('#' * $filled) + ('-' * (15 - $filled)) + ']'
-    $prefix = $bar + ' ' + $pct + '％ · ' + $speed + ' MB/s · 剩余约 ' + $remMin + ' 分钟 · ♪ '
-    $pad = ' ' * [Math]::Max(0, 70 - ($prefix + $sb).Length)
-    if ($supportsVT) {
-      $ci2 = $ci - [Math]::Floor($ci / 10) * 10
-      $out = $ESC + '[38;5;81m' + $prefix + $ESC + '[38;5;' + $colors[$ci2] + 'm' + $sb + $ESC + '[0m' + $pad
-    } else {
-      $out = $prefix + $sb + $pad
+  $colIdx = 0
+  # 初始两行占位（进度行 + 歌词行），光标回第一行
+  [Console]::Write((' ' * 76) + "`n" + (' ' * 76))
+  [Console]::Write($ESC + '[1A' + "`r")
+  for ($tick = 1; $tick -le $totalTicks; $tick++) {
+    # 歌词逐字推进（循环播放）
+    $ch = $chars[$charIdx]
+    $charIdx++
+    if ($charIdx -ge $total) { $charIdx = 0 }
+    if ($ch -eq "`n") { $sb = '' } else { $sb += $ch }
+    # 渲染歌词行（彩虹逐字，6 色循环）
+    $lyr = '♪ '
+    $c2 = $colIdx
+    foreach ($cc in $sb.ToCharArray()) {
+      if ($supportsVT) {
+        $lyr += $ESC + '[38;5;' + $rainbow[$c2] + 'm' + $cc + $ESC + '[0m'
+      } else {
+        $lyr += $cc
+      }
+      $c2++
+      if ($c2 -ge 6) { $c2 = 0 }
     }
-    [Console]::Write("`r" + $out)
-    Start-Sleep -Milliseconds 300
+    $colIdx++
+    if ($colIdx -ge 6) { $colIdx = 0 }
+    # 进度条推进（每 10 tick 一步）：40 格，速度 5-10 MB/s，剩余时间按速度真实计算
+    $tickCount++
+    if ($tickCount -ge 10) {
+      $tickCount = 0
+      $step++
+      if ($step -gt $steps) { $step = $steps }
+      $pct = [Math]::Floor($step * 100 / $steps)
+      $speed = Get-Random -Minimum 5 -Maximum 11
+      $remMin = [Math]::Max(1, [Math]::Round($totalMB * (100 - $pct) / 100 / $speed / 60))
+      $filled = [Math]::Floor($pct * 40 / 100)
+      $bar = '[' + ('#' * $filled) + ('-' * (40 - $filled)) + ']'
+      $line1 = $bar + ' ' + $pct + '％ · ' + $speed + ' MB/s · 剩余约 ' + $remMin + ' 分钟'
+      $pad1 = ' ' * [Math]::Max(0, 76 - $line1.Length)
+      if ($supportsVT) {
+        [Console]::Write("`r" + $ESC + '[38;5;81m' + $line1 + $ESC + '[0m' + $pad1)
+      } else {
+        [Console]::WriteLine($line1)
+      }
+    }
+    # 歌词行独立输出（VT：第二行刷新后光标回到第一行）
+    $pad2 = ' ' * [Math]::Max(0, 50 - $sb.Length)
+    if ($supportsVT) {
+      [Console]::Write("`n`r" + $lyr + $pad2 + $ESC + '[1A' + "`r")
+    }
+    Start-Sleep -Milliseconds 200
   }
+  [Console]::WriteLine('')
   [Console]::WriteLine('')
   Ok '下载完成（40.5 GB）'
   Ln ''
