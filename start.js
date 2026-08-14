@@ -1181,6 +1181,7 @@ async function runningMenu(child = null, isBackground = false) {
       } else {
         console.log(item('1', '转入后台', '关闭窗口后服务继续运行'))
         console.log(item('2', '停止服务', '停止服务并返回主菜单'))
+        console.log(item('0', '返回主菜单', '服务转入后台继续运行'))
         hint('直接关闭窗口也会停止服务 · 状态每 10 秒自动检测')
       }
     } else {
@@ -1262,6 +1263,18 @@ async function runningMenu(child = null, isBackground = false) {
             if (config.firewall?.enabled !== false && config.firewall?.ruleName) {
               removeFirewall(config.firewall.ruleName)
             }
+            await waitKey('按回车返回主菜单')
+            return
+          } else if (choice === '0') {
+            // 转入后台并返回主菜单（服务继续运行，不停止）
+            clearInterval(timer)
+            log('转入后台 ...')
+            killPid(child.pid)
+            await new Promise(r => setTimeout(r, 800))
+            const pid = spawnBackground()
+            console.log('')
+            log(ok(`服务已转入后台运行（PID ${pid}）`))
+            console.log('')
             await waitKey('按回车返回主菜单')
             return
           }

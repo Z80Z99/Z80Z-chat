@@ -1247,7 +1247,11 @@ function Invoke-NpmInstall($projDir, $cfg) {
         }
         $code = $LASTEXITCODE
         if (Test-Path $outFile) { $lastOut = [System.IO.File]::ReadAllText($outFile); $lastReg = $regName }
-        if ($code -eq 0) { return }
+        if ($code -eq 0) {
+          # 成功后清理 npm 输出日志残留（.npm-out-*.txt）
+          Get-ChildItem $Root -Filter '.npm-out-*.txt' -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+          return
+        }
         if ($attempt -lt 2) {
           Hint ('  ' + $regName + ' 源安装失败（退出码 ' + $code + '），3 秒后自动重试...')
           Start-Sleep -Seconds 3
