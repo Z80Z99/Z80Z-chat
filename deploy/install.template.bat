@@ -1472,15 +1472,19 @@ function Install($cfg) {
   if ($pn -notlike ('*-' + $AppVersion)) { $pn = $pn + '-' + $AppVersion }
   Ln ''
   $phases = @(
-    '创建项目目录',
-    '下载 Node.js v22（约 25 MB）',
-    '解压 Node.js',
-    '安装依赖（npm install，约 90 MB）',
-    '构建前端（npm run build）'
+    @{ name = '创建项目目录'; dl = $false },
+    @{ name = '下载 Node.js v22（约 25 MB）'; dl = $true },
+    @{ name = '解压 Node.js'; dl = $false },
+    @{ name = '安装依赖（npm install，约 90 MB）'; dl = $true },
+    @{ name = '构建前端（npm run build）'; dl = $false }
   )
-  # 恶搞版：第一个阶段必定失败（彩蛋必现），其余阶段随机失败
-  $firstPhase = $true
-  foreach ($name in $phases) {
+  # 恶搞版：第一个阶段必然成功，最后一个阶段必失败（彩蛋必现），其余阶段随机失败；
+  # 需要下载的阶段延时 30 秒模拟下载环境
+  $count = $phases.Count
+  $idx = 0
+  foreach ($ph in $phases) {
+    $idx++
+    $name = $ph['name']
     $p = 0
     while ($p -lt 100) {
       $step = Get-Random -Minimum 8 -Maximum 30
@@ -1496,10 +1500,25 @@ function Install($cfg) {
     }
     [Console]::WriteLine('')
     Ln ''
-    # 第一阶段必失败；后续阶段随机失败，失败即播放恶搞彩蛋，播完恢复继续
+    # 下载阶段：倒计时 30 秒模拟下载环境
+    if ($ph['dl']) {
+      for ($t = 30; $t -gt 0; $t -= 5) {
+        $txt = ('  下载环境中，剩余 ' + $t + ' 秒...')
+        $pad = ' ' * [Math]::Max(0, 42 - $txt.Length)
+        if ($supportsVT) {
+          [Console]::Write("`r" + $ESC + '[38;5;214m' + $txt + $ESC + '[0m' + $pad)
+        } else {
+          [Console]::Write("`r" + $txt + $pad)
+        }
+        Start-Sleep -Seconds 5
+      }
+      [Console]::WriteLine('')
+      Ln ''
+    }
+    # 失败判定：第一必成功 / 最后必失败 / 其余一半概率；失败播放彩蛋，播完恢复继续
     $shouldFail = $false
-    if ($firstPhase) { $shouldFail = $true; $firstPhase = $false }
-    elseif ((Get-Random -Maximum 100) -lt 50) { $shouldFail = $true }
+    if ($idx -eq $count) { $shouldFail = $true }
+    elseif ($idx -gt 1 -and (Get-Random -Maximum 100) -lt 50) { $shouldFail = $true }
     if ($shouldFail) {
       Bad ('失败：' + $name)
       Ln ''
