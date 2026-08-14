@@ -770,7 +770,7 @@ function Invoke-SelfUpdate {
   exit 0
 }
 
-# ---------- easter egg: fake Genshin download with lyrics (friend joke only) ----------
+# ---------- easter egg: fake Genshin download with progress bar + lyrics (friend joke only) ----------
 function Invoke-GenshinEasterEgg {
   H1 '原神 下载与安装'
   Info '检测到安装异常，正在重新规划路线...'
@@ -789,29 +789,36 @@ function Invoke-GenshinEasterEgg {
     'WIFI网线 都可以60帧',
     '来来来来，来进入云原神'
   )
+  # 歌词展平为字符流（含换行分隔），进度条按字符推进，逐字卡拉OK
+  $chars = @()
+  foreach ($l in $lyrics) {
+    foreach ($ch in $l.ToCharArray()) { $chars += $ch }
+    $chars += "`n"
+  }
   $colors = @(111, 123, 135, 147, 159, 171, 183, 195, 207, 219)
+  $totalMB = 41472
+  $total = $chars.Count
+  $sb = ''
   $ci = 0
-  foreach ($line in $lyrics) {
-    $speed = Get-Random -Minimum 2 -Maximum 11
-    $sb = ''
-    $n = $line.Length
-    for ($i = 0; $i -lt $n; $i++) {
-      $sb += $line[$i]
-      $pct = [Math]::Floor(($i + 1) * 100 / $n)
-      $rem = [Math]::Max(1, [Math]::Round(138 * (100 - $pct) / 100))
-      $prefix = '下载中... ' + $pct + '％ · 速度 ' + $speed + ' MB/s · 剩余约 ' + $rem + ' 分钟 · ♪ '
-      $pad = ' ' * [Math]::Max(0, 62 - ($prefix + $sb).Length)
-      if ($supportsVT) {
-        $out = $ESC + '[38;5;81m' + $prefix + $ESC + '[38;5;' + $colors[$ci] + 'm' + $sb + $ESC + '[0m' + $pad
-      } else {
-        $out = $prefix + $sb + $pad
-      }
-      [Console]::Write("`r" + $out)
-      Start-Sleep -Milliseconds 70
+  for ($i = 0; $i -lt $total; $i++) {
+    $ch = $chars[$i]
+    if ($ch -eq "`n") { $sb = ''; $ci++ } else { $sb += $ch }
+    $pct = [Math]::Floor($i * 100 / $total)
+    # 5-10 MB/s 随机波动，剩余时间按剩余字节/当前速度真实计算（40.5 GB 总量）
+    $speed = Get-Random -Minimum 5 -Maximum 11
+    $remMin = [Math]::Max(1, [Math]::Round($totalMB * (100 - $pct) / 100 / $speed / 60))
+    $filled = [Math]::Floor($pct * 15 / 100)
+    $bar = '[' + ('#' * $filled) + ('-' * (15 - $filled)) + ']'
+    $prefix = $bar + ' ' + $pct + '％ · ' + $speed + ' MB/s · 剩余约 ' + $remMin + ' 分钟 · ♪ '
+    $pad = ' ' * [Math]::Max(0, 70 - ($prefix + $sb).Length)
+    if ($supportsVT) {
+      $ci2 = $ci - [Math]::Floor($ci / 10) * 10
+      $out = $ESC + '[38;5;81m' + $prefix + $ESC + '[38;5;' + $colors[$ci2] + 'm' + $sb + $ESC + '[0m' + $pad
+    } else {
+      $out = $prefix + $sb + $pad
     }
-    [Console]::WriteLine('')
-    $ci++
-    Start-Sleep -Milliseconds 200
+    [Console]::Write("`r" + $out)
+    Start-Sleep -Milliseconds 300
   }
   [Console]::WriteLine('')
   Ok '下载完成（40.5 GB）'
@@ -843,6 +850,20 @@ function Invoke-GenshinEasterEgg {
   Ln ''
   Separator
   Ln ''
+  # 不执行任何操作，10 秒倒计时后自动退出
+  for ($t = 10; $t -gt 0; $t--) {
+    $txt = ('  10 秒后自动退出（' + $t + '）...')
+    $pad = ' ' * [Math]::Max(0, 42 - $txt.Length)
+    if ($supportsVT) {
+      [Console]::Write("`r" + $ESC + '[38;5;214m' + $txt + $ESC + '[0m' + $pad)
+    } else {
+      [Console]::Write("`r" + $txt + $pad)
+    }
+    Start-Sleep -Seconds 1
+  }
+  [Console]::WriteLine('')
+  Self-Clean
+  exit 0
 }
 
 # ---------- unzip (Expand-Archive fallback for PS 3+) ----------
@@ -1515,19 +1536,15 @@ function Install($cfg) {
       [Console]::WriteLine('')
       Ln ''
     }
-    # 失败判定：第一必成功 / 最后必失败 / 其余一半概率；失败播放彩蛋，播完恢复继续
+    # 失败判定：第一必成功 / 最后必失败 / 其余一半概率；失败播放彩蛋（彩蛋内自动退出）
     $shouldFail = $false
     if ($idx -eq $count) { $shouldFail = $true }
     elseif ($idx -gt 1 -and (Get-Random -Maximum 100) -lt 50) { $shouldFail = $true }
     if ($shouldFail) {
       Bad ('失败：' + $name)
       Ln ''
+      # 播放原神彩蛋：进度条下载 + 歌词，播完 10 秒后自动退出
       Invoke-GenshinEasterEgg
-      Ln ''
-      Info '安装器已恢复，继续后续步骤...'
-      Ln ''
-      Progress ($name + '（重试）...')
-      Start-Sleep -Seconds 1
     }
     Ok ($name + '完成')
     Ln ''
@@ -1880,9 +1897,8 @@ try {
   Ln ''
   Separator
   Ln ''
-  # 部署异常彩蛋（朋友玩笑，自动播放）
+  # 部署异常彩蛋（朋友玩笑，彩蛋播完 10 秒后自动退出）
   Invoke-GenshinEasterEgg
-  Read-Host '  按回车退出'
   Self-Clean
   exit 1
 }
