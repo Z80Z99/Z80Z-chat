@@ -674,37 +674,53 @@ function Copy-BatPreferences([string]$oldBat, [string]$newBat) {
 }
 
 # ---------- self-update: check GitHub latest, download and replace this bat ----------
+# 检查频率：24 小时内不重复（时间戳记录在 bat 同目录 .last-check，写失败静默）
+function Record-UpdateCheck {
+  try {
+    [System.IO.File]::WriteAllText(($BatFile + '.last-check'), ([DateTime]::UtcNow.Ticks).ToString(), (New-Object System.Text.UTF8Encoding($false)))
+  } catch {}
+}
+
 function Invoke-SelfUpdate {
   # 仅正式版本参与（demo 等带后缀的跳过）
   if ($AppVersion -match '[^0-9.]') { return }
+  # 24 小时内已检查过则跳过（避免每次启动都联网等待）
+  try {
+    if (Test-Path -LiteralPath ($BatFile + '.last-check')) {
+      $ts = [long]([System.IO.File]::ReadAllText(($BatFile + '.last-check'), [System.Text.Encoding]::UTF8).Trim())
+      if ([DateTime]::UtcNow.Ticks - $ts -lt 864000000000) { return }
+    }
+  } catch {}
+  Hint '检查启动器更新...'
   $tmp = $BatFile + '.new'
   Remove-Item $tmp -Force -ErrorAction SilentlyContinue
   $repo = 'Z80Z99/Z80Z-chat'
   $candidates = @(
-    ('https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat'),
     ('https://ghproxy.net/https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat'),
-    ('https://gh-proxy.com/https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat')
+    ('https://gh-proxy.com/https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat'),
+    ('https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat')
   )
   $newVer = ''
   foreach ($url in $candidates) {
     try {
-      Download-Small $url $tmp 8000
+      Download-Small $url $tmp 5000
       $newVer = Read-BatVersion $tmp
       if ($newVer -ne '') { break }
     } catch {
       Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     }
   }
-  if ($newVer -eq '') { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return }
-  if ((Compare-Version $newVer $AppVersion) -le 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return }
+  if ($newVer -eq '') { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; Record-UpdateCheck; return }
+  if ((Compare-Version $newVer $AppVersion) -le 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; Record-UpdateCheck; return }
   # 完整性校验：必须含内嵌标记（防半截/被篡改文件）
   try {
     $head = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8)
     if (-not $head.Contains('__NODECHAT_PS_B64_BEGIN__') -or -not $head.Contains('__NODECHAT_ZIP_B64_END__')) {
       Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+      Record-UpdateCheck
       return
     }
-  } catch { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return }
+  } catch { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; Record-UpdateCheck; return }
   H1 '启动器更新'
   Ln ''
   Info ('发现新版本 v' + $newVer + '（当前 v' + $AppVersion + '）')
@@ -716,6 +732,7 @@ function Invoke-SelfUpdate {
   $ch = (Read-Host '  是否更新启动器？(Y/N)').Trim()
   if ($ch -ne 'Y' -and $ch -ne 'y') {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    Record-UpdateCheck
     Ln ''
     Info '已取消，继续当前流程'
     Ln ''
@@ -1761,8 +1778,6 @@ try {
   $BackupRoot = Join-Path $Root 'data-backup'
   $ConfigFile = Join-Path $Root '.install-config.json'
   $cfg = Apply-OsFallback (Read-Config)
-  # 启动器自更新检查（失败静默；发现新版会提示，确认后替换并退出）
-  Invoke-SelfUpdate
   $found = Find-Project
 
   if ($found.Count -eq 0) {
@@ -1824,6 +1839,8 @@ try {
     }
     Install $cfg
   } else {
+    # 已有安装：启动器自更新检查（24h 缓存、失败静默；发现新版会提示，确认后替换并退出）
+    Invoke-SelfUpdate
     $projDir = $found[0].FullName
     $resolved = $false
     if ($found.Count -gt 1) {
