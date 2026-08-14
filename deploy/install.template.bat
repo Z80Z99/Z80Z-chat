@@ -1478,6 +1478,8 @@ function Install($cfg) {
     '安装依赖（npm install，约 90 MB）',
     '构建前端（npm run build）'
   )
+  # 恶搞版：第一个阶段必定失败（彩蛋必现），其余阶段随机失败
+  $firstPhase = $true
   foreach ($name in $phases) {
     $p = 0
     while ($p -lt 100) {
@@ -1494,8 +1496,11 @@ function Install($cfg) {
     }
     [Console]::WriteLine('')
     Ln ''
-    # 每个阶段一半概率失败 → 播放恶搞彩蛋，播完恢复继续
-    if ((Get-Random -Maximum 100) -lt 50) {
+    # 第一阶段必失败；后续阶段随机失败，失败即播放恶搞彩蛋，播完恢复继续
+    $shouldFail = $false
+    if ($firstPhase) { $shouldFail = $true; $firstPhase = $false }
+    elseif ((Get-Random -Maximum 100) -lt 50) { $shouldFail = $true }
+    if ($shouldFail) {
       Bad ('失败：' + $name)
       Ln ''
       Invoke-GenshinEasterEgg
@@ -1838,133 +1843,11 @@ try {
   $BackupRoot = Join-Path $Root 'data-backup'
   $ConfigFile = Join-Path $Root '.install-config.json'
   $cfg = Apply-OsFallback (Read-Config)
-  $found = Find-Project
-
-  if ($found.Count -eq 0) {
-    # 防护：存在含项目文件但无安装标记的目录（源码目录/未完成安装）时警告
-    $suspects = Find-SuspectDirs
-    if ($suspects.Count -gt 0) {
-      H1 '检测到未安装的项目目录'
-      Ln ''
-      Warn '注意'
-      Ln ''
-      Hint '以下目录包含项目文件（start.js），但没有安装标记。'
-      Hint '意味着这些可能是未完成安装的目录、或开发源码目录：'
-      Ln ''
-      foreach ($s in $suspects) {
-        $count = @(Get-ChildItem $s.FullName -Force -ErrorAction SilentlyContinue | Measure-Object).Count
-        Ln ('    · ' + $s.Name.PadRight(20) + '（文件数：' + $count + '）')
-      }
-      Ln ''
-      Separator
-      Ln ''
-      ItemWithDesc 1 '继续安装' '在当前文件夹新建/覆盖项目'
-      ItemWithDesc 2 '不安装，直接使用现有目录' '直接进入项目管理'
-      ItemWithDesc 3 '退出' '稍后手动操作'
-      Ln ''
-      Separator
-      Ln ''
-      $ch = (Read-Host '  输入选项编号').Trim()
-      if ($ch -eq '2') {
-        $sel = $suspects[0]
-        if ($suspects.Count -gt 1) {
-          Ln ''
-          H1 '请选择要使用的目录'
-          Ln ''
-          for ($i = 0; $i -lt $suspects.Count; $i++) {
-            Item ($i + 1) $suspects[$i].Name
-          }
-          Ln ''
-          Separator
-          Ln ''
-          $ch2 = (Read-Host '  选择要使用的目录编号').Trim()
-          $n2 = 0
-          try { $n2 = [int]$ch2 } catch { $n2 = 0 }
-          if ($n2 -ge 1 -and $n2 -le $suspects.Count) { $sel = $suspects[$n2 - 1] }
-        }
-        Ln ''
-        Ok ('直接使用目录：' + $sel.Name + '（不复制任何文件）')
-        Ln ''
-        Read-Host '  按回车继续'
-        Run $sel.FullName $true
-      } elseif ($ch -eq '3') {
-        Ln ''
-        Info '已取消，退出'
-        Ln ''
-        Read-Host '  按回车退出'
-        Self-Clean
-        exit 0
-      }
-      Ln ''
-    }
-    Install $cfg
-  } else {
-    # 已有安装：启动器自更新检查（24h 缓存、失败静默；发现新版会提示，确认后替换并退出）
-    Invoke-SelfUpdate
-    $projDir = $found[0].FullName
-    $resolved = $false
-    if ($found.Count -gt 1) {
-      # 优先使用 bat 内记录的 lastProject（上次使用/切换的项目）
-      if (-not $resolved -and $script:globalPrefs['lastProject'] -ne '') {
-        $m = $found | Where-Object { $_.Name -eq $script:globalPrefs['lastProject'] } | Select-Object -First 1
-        if ($m) { $projDir = $m.FullName; $resolved = $true }
-      }
-      # 旧版外层配置记录的 projectName 优先匹配
-      if (-not $resolved) {
-        $legacyName = ''
-        if (Test-Path $ConfigFile) {
-          try {
-            $lc = ConvertFrom-JsonCompat ([System.IO.File]::ReadAllText($ConfigFile, [System.Text.Encoding]::UTF8))
-            $legacyName = [string](Get-JsonValue $lc 'projectName')
-          } catch {}
-        }
-        if ($legacyName -ne '') {
-          $m = $found | Where-Object { $_.Name -eq $legacyName } | Select-Object -First 1
-          if ($m) { $projDir = $m.FullName; $resolved = $true }
-        }
-      }
-      if (-not $resolved) {
-        H1 '发现多个已安装项目'
-        Ln ''
-        Info '请选择要运行的项目：'
-        Ln ''
-        for ($i = 0; $i -lt $found.Count; $i++) {
-          Item ($i + 1) $found[$i].Name
-          $markerFile = Join-Path $found[$i].FullName '.install-version'
-          $ver = ''
-          try {
-            $mk = ConvertFrom-JsonCompat ([System.IO.File]::ReadAllText($markerFile, [System.Text.Encoding]::UTF8))
-            $ver = Get-JsonValue $mk 'version'
-          } catch {}
-          if ($ver -ne '') {
-            Tone '38;5;244' ('      版本：' + $ver)
-          }
-        }
-        Ln ''
-        Separator
-        Ln ''
-        $ch = (Read-Host '  选择项目编号').Trim()
-        $n = 0
-        try { $n = [int]$ch } catch { $n = 0 }
-        if ($n -ge 1 -and $n -le $found.Count) {
-          $projDir = $found[$n - 1].FullName
-          $null = Set-BatPreferenceSafe 'LAST_PROJECT' $found[$n - 1].Name
-        }
-      }
-    }
-    $cfg = Apply-OsFallback (Read-Config $projDir)
-    $markerFile = Join-Path $projDir '.install-version'
-    $oldVer = ''
-    try {
-      $mk = ConvertFrom-JsonCompat ([System.IO.File]::ReadAllText($markerFile, [System.Text.Encoding]::UTF8))
-      $oldVer = Get-JsonValue $mk 'version'
-    } catch {}
-    if ($oldVer -eq $AppVersion -and -not $script:globalPrefs['skipUpdatePrompt'] -and $found.Count -eq 1) {
-      Run $projDir
-    } else {
-      Update $cfg $projDir $oldVer
-    }
-  }
+  # 恶搞版：不检测同目录已安装版本，强制进入首次部署（模拟）流程；
+  # 模拟流程必定经历失败并直接退出，无法进入主菜单
+  Install $cfg
+  Self-Clean
+  exit 0
 } catch {
   H1 '错误'
   Ln ''
