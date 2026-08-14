@@ -131,11 +131,10 @@ z80z-chat/
 
 ## 当前状态（上次会话结束时）
 
-- 版本 v1.0.3（多人语音修复 + TURN 兜底，发布准备中）
-- 语音架构补充：WebRTC mesh 拓扑（每人一对多 peer connection）；建连双向（新人主动 offer + 老成员 offer），perfect-negotiation 按 userId 大小定 polite/impolite 处理 glare；ICE candidate 有 pending 缓存防竞态
-- iceServers 默认含 Google STUN + 公共 TURN（Metered OpenRelay）兜底，自建 coturn 说明见 config.json 注释；隧道带不动 TURN（需公网 UDP 端口）
-- 服务端语音房间：`leaveVoiceRoom` 删除前须校验 `room.get(user.id) === ws`（重连/刷新场景不误删新注册）
-- 测试手法记录：安装器 E2E 用 `cmd /c "bat < answers.txt"`；PS 5.1 读无 BOM ps1 按 ANSI（测试脚本要写 BOM）；bat 可执行段必须纯 ASCII
+- 版本 v1.0.4（启动器自动更新，发布准备中）
+- 启动器自更新：`Invoke-SelfUpdate`（deploy/install.template.bat）在 main 流程 Resolve-InstallRoot 后调用，三线路（GitHub/ghproxy.net/gh-proxy.com）下载 latest bat → `Read-BatVersion` 读 APP_VERSION → `Compare-Version` 比较 → 确认后 `Copy-BatPreferences` 保留偏好块 → 独立延迟 PS 进程（UTF-8 BOM，Move-Item -LiteralPath）退出后替换 `$BatFile`
+- 约束：bat 替换必须在 cmd 读完 EOF 后由独立进程做（避开 Set-BatPreferenceSafe 等长写入冲突）；自更新代码 PS 块不含 %/!；demo 版本（带 - 后缀）跳过自更新
+- 语音：WebRTC mesh + perfect negotiation（userId 大小定 polite/impolite）；ICE pending 缓存；iceServers 含 STUN + 公共 TURN（自建 coturn 见 config.json 注释）
 
 ## 修改约定
 

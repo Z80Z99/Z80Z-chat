@@ -601,6 +601,158 @@ function Download-File([string]$url, [string]$dest) {
   }
 }
 
+# ---------- small-file download (short timeout, no chunk resume) ----------
+# 用于启动器自更新等小文件：超时短、快速失败，不适合大文件
+function Download-Small([string]$url, [string]$dest, [int]$timeoutMs = 8000) {
+  try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
+  $req = [System.Net.HttpWebRequest]::Create($url)
+  $req.Method = 'GET'
+  $req.Timeout = $timeoutMs
+  $req.ReadWriteTimeout = $timeoutMs
+  $req.Proxy = $null
+  $req.AllowAutoRedirect = $true
+  $resp = $req.GetResponse()
+  try {
+    $in = $resp.GetResponseStream()
+    $out = [System.IO.File]::Create($dest)
+    try {
+      $buf = New-Object byte[] 65536
+      while (($read = $in.Read($buf, 0, $buf.Length)) -gt 0) { $out.Write($buf, 0, $read) }
+    } finally { $out.Close() }
+    $in.Close()
+  } finally { $resp.Close() }
+}
+
+# ---------- read APP_VERSION from a generated bat (shell header) ----------
+function Read-BatVersion([string]$path) {
+  try {
+    $sr = New-Object System.IO.StreamReader($path, [System.Text.Encoding]::UTF8)
+    try {
+      while (($line = $sr.ReadLine()) -ne $null) {
+        if ($line -match '^set "APP_VERSION=([0-9.]+)"') { return $Matches[1] }
+        if ($line -match '^:RUN') { break }
+      }
+    } finally { $sr.Close() }
+  } catch {}
+  return ''
+}
+
+# ---------- semantic version compare ----------
+# 返回 1：a > b；0：相等；-1：a < b（异常时返回 0）
+function Compare-Version([string]$a, [string]$b) {
+  try {
+    $pa = @($a -split '\.' | ForEach-Object { [int]$_ })
+    $pb = @($b -split '\.' | ForEach-Object { [int]$_ })
+    $n = [Math]::Max($pa.Count, $pb.Count)
+    for ($i = 0; $i -lt $n; $i++) {
+      $va = 0; if ($i -lt $pa.Count) { $va = $pa[$i] }
+      $vb = 0; if ($i -lt $pb.Count) { $vb = $pb[$i] }
+      if ($va -gt $vb) { return 1 }
+      if ($va -lt $vb) { return -1 }
+    }
+    return 0
+  } catch { return 0 }
+}
+
+# ---------- preserve preference block (REM _KEY= lines) across bat replace ----------
+function Copy-BatPreferences([string]$oldBat, [string]$newBat) {
+  try {
+    $oldLines = [System.IO.File]::ReadAllLines($oldBat, [System.Text.Encoding]::UTF8)
+    $newLines = [System.IO.File]::ReadAllLines($newBat, [System.Text.Encoding]::UTF8)
+    foreach ($key in @('_SKIP_UPDATE_PROMPT', '_SKIP_UPDATE_PROMPT_VERSION', '_LAST_PROJECT')) {
+      $val = ''
+      foreach ($ol in $oldLines) {
+        if ($ol -match ('^REM ' + $key + '=')) { $val = $ol; break }
+      }
+      if ($val -eq '') { continue }
+      for ($i = 0; $i -lt $newLines.Count; $i++) {
+        if ($newLines[$i] -match ('^REM ' + $key + '=')) { $newLines[$i] = $val; break }
+      }
+    }
+    [System.IO.File]::WriteAllText($newBat, ($newLines -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  } catch {}
+}
+
+# ---------- self-update: check GitHub latest, download and replace this bat ----------
+function Invoke-SelfUpdate {
+  # 仅正式版本参与（demo 等带后缀的跳过）
+  if ($AppVersion -match '[^0-9.]') { return }
+  $tmp = $BatFile + '.new'
+  Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+  $repo = 'Z80Z99/Z80Z-chat'
+  $candidates = @(
+    ('https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat'),
+    ('https://ghproxy.net/https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat'),
+    ('https://gh-proxy.com/https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat')
+  )
+  $newVer = ''
+  foreach ($url in $candidates) {
+    try {
+      Download-Small $url $tmp 8000
+      $newVer = Read-BatVersion $tmp
+      if ($newVer -ne '') { break }
+    } catch {
+      Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    }
+  }
+  if ($newVer -eq '') { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return }
+  if ((Compare-Version $newVer $AppVersion) -le 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return }
+  # 完整性校验：必须含内嵌标记（防半截/被篡改文件）
+  try {
+    $head = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8)
+    if (-not $head.Contains('__NODECHAT_PS_B64_BEGIN__') -or -not $head.Contains('__NODECHAT_ZIP_B64_END__')) {
+      Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+      return
+    }
+  } catch { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return }
+  H1 '启动器更新'
+  Ln ''
+  Info ('发现新版本 v' + $newVer + '（当前 v' + $AppVersion + '）')
+  Ln ''
+  Hint '  更新后需要重新双击本文件进入新版'
+  Ln ''
+  Separator
+  Ln ''
+  $ch = (Read-Host '  是否更新启动器？(Y/N)').Trim()
+  if ($ch -ne 'Y' -and $ch -ne 'y') {
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    Ln ''
+    Info '已取消，继续当前流程'
+    Ln ''
+    return
+  }
+  # 保留旧偏好块到新 bat
+  Copy-BatPreferences $BatFile $tmp
+  # 生成延迟替换器：等当前进程（cmd 读至 EOF）结束后替换并自删
+  $replacer = Join-Path $env:TEMP ('z80z-selfupdate-' + [System.Guid]::NewGuid().ToString('N') + '.ps1')
+  try {
+    $escTmp = $tmp -replace "'", "''"
+    $escBat = $BatFile -replace "'", "''"
+    $script = "Start-Sleep -Seconds 2`r`n" +
+              "Move-Item -Force -LiteralPath '" + $escTmp + "' -Destination '" + $escBat + "'`r`n" +
+              "Remove-Item -LiteralPath `$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue"
+    [System.IO.File]::WriteAllText($replacer, $script, (New-Object System.Text.UTF8Encoding($true)))
+    $null = Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $replacer + '"')
+  } catch {
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    Remove-Item $replacer -Force -ErrorAction SilentlyContinue
+    Bad '更新启动失败，请稍后重试'
+    Ln ''
+    Read-Host '  按回车继续'
+    return
+  }
+  Ln ''
+  Ok ('已准备更新到 v' + $newVer)
+  Ln ''
+  Hint '  本窗口即将退出，稍后重新双击本文件即可进入新版'
+  Ln ''
+  Separator
+  Ln ''
+  Read-Host '  按回车退出'
+  Self-Clean
+  exit 0
+}
+
 # ---------- unzip (Expand-Archive fallback for PS 3+) ----------
 function Expand-Zip([string]$zip, [string]$dest) {
   try {
@@ -1609,6 +1761,8 @@ try {
   $BackupRoot = Join-Path $Root 'data-backup'
   $ConfigFile = Join-Path $Root '.install-config.json'
   $cfg = Apply-OsFallback (Read-Config)
+  # 启动器自更新检查（失败静默；发现新版会提示，确认后替换并退出）
+  Invoke-SelfUpdate
   $found = Find-Project
 
   if ($found.Count -eq 0) {
