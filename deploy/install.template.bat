@@ -775,7 +775,7 @@ function Invoke-GenshinEasterEgg {
   H1 '原神 下载与安装'
   Info '检测到安装异常，正在重新规划路线...'
   Ln ''
-  Hint '正在下载：GenshinImpact_5.0_win64_full.zip（约 40.5 GB）'
+  Hint '正在下载完整客户端（约 170.31 GB）'
   Ln ''
   $lyrics = @(
     '哒哒哒哒哒 好想玩原神 云原神',
@@ -795,20 +795,22 @@ function Invoke-GenshinEasterEgg {
     foreach ($ch in $l.ToCharArray()) { $chars += $ch }
     $chars += "`n"
   }
-  $totalMB = 41472
+  $totalBytes = 170310000000
   $total = $chars.Count
   $rainbow = @(196, 208, 220, 118, 51, 39)
-  # 10 分钟 = 3000 tick × 200ms；进度条 300 步（每 10 tick 推进 1 步）
-  $totalTicks = 3000
-  $steps = 300
+  # 1 小时 = 18000 tick × 200ms；进度条 1800 步（每 10 tick 推进 1 步）
+  $totalTicks = 18000
+  $steps = 1800
   $tickCount = 0
   $step = 0
   $charIdx = 0
   $sb = ''
   $colIdx = 0
-  # 初始两行占位（进度行 + 歌词行），光标回第一行
-  [Console]::Write((' ' * 76) + "`n" + (' ' * 76))
-  [Console]::Write($ESC + '[1A' + "`r")
+  # 歌词固定在窗口底部：先输出 20 行占位，光标回顶部
+  if ($supportsVT) {
+    for ($i = 0; $i -lt 20; $i++) { [Console]::WriteLine('') }
+    [Console]::Write($ESC + '[20A' + "`r")
+  }
   for ($tick = 1; $tick -le $totalTicks; $tick++) {
     # 歌词逐字推进（循环播放）
     $ch = $chars[$charIdx]
@@ -829,18 +831,22 @@ function Invoke-GenshinEasterEgg {
     }
     $colIdx++
     if ($colIdx -ge 6) { $colIdx = 0 }
-    # 进度条推进（每 10 tick 一步）：40 格，速度 5-10 MB/s，剩余时间按速度真实计算
+    # 进度条推进（每 10 tick 一步）：36 格，速度 5-10 MB/s，剩余时间按剩余字节/速度真实计算
     $tickCount++
     if ($tickCount -ge 10) {
       $tickCount = 0
       $step++
       if ($step -gt $steps) { $step = $steps }
-      $pct = [Math]::Floor($step * 100 / $steps)
+      $pct = $step * 100 / $steps
+      $pctTxt = [Math]::Floor($pct * 10) / 10
       $speed = Get-Random -Minimum 5 -Maximum 11
-      $remMin = [Math]::Max(1, [Math]::Round($totalMB * (100 - $pct) / 100 / $speed / 60))
-      $filled = [Math]::Floor($pct * 40 / 100)
-      $bar = '[' + ('#' * $filled) + ('-' * (40 - $filled)) + ']'
-      $line1 = $bar + ' ' + $pct + '％ · ' + $speed + ' MB/s · 剩余约 ' + $remMin + ' 分钟'
+      $remBytes = $totalBytes - ($totalBytes * $step / $steps)
+      $remSec = [Math]::Round($remBytes / ($speed * 1048576))
+      $remH = [Math]::Floor($remSec / 3600)
+      $remM = [Math]::Floor(($remSec - $remH * 3600) / 60)
+      $filled = [Math]::Floor($pct * 36 / 100)
+      $bar = '[' + ('#' * $filled) + ('-' * (36 - $filled)) + ']'
+      $line1 = $bar + ' ' + $pctTxt + '％ · ' + $speed + ' MB/s · 剩余约 ' + $remH + ' 小时 ' + $remM.ToString('00') + ' 分'
       $pad1 = ' ' * [Math]::Max(0, 76 - $line1.Length)
       if ($supportsVT) {
         [Console]::Write("`r" + $ESC + '[38;5;81m' + $line1 + $ESC + '[0m' + $pad1)
@@ -848,16 +854,16 @@ function Invoke-GenshinEasterEgg {
         [Console]::WriteLine($line1)
       }
     }
-    # 歌词行独立输出（VT：第二行刷新后光标回到第一行）
+    # 歌词固定在窗口底部刷新
     $pad2 = ' ' * [Math]::Max(0, 50 - $sb.Length)
     if ($supportsVT) {
-      [Console]::Write("`n`r" + $lyr + $pad2 + $ESC + '[1A' + "`r")
+      [Console]::Write($ESC + '[20B' + "`r" + $lyr + $pad2 + $ESC + '[20A' + "`r")
     }
     Start-Sleep -Milliseconds 200
   }
   [Console]::WriteLine('')
   [Console]::WriteLine('')
-  Ok '下载完成（40.5 GB）'
+  Ok '下载完成（170.31 GB）'
   Ln ''
   Progress '校验文件完整性（SHA256）...'
   Start-Sleep -Seconds 1
