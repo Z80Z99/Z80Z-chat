@@ -13,12 +13,6 @@ export const useServerStore = defineStore('server', () => {
   const invites = ref<Invite[]>([])
   const currentChannel = ref<Channel | null>(null)
 
-  const textChannels = computed(() =>
-    channels.value.filter(c => c.type === 'text').sort((a, b) => a.position - b.position)
-  )
-  const voiceChannels = computed(() =>
-    channels.value.filter(c => c.type === 'voice').sort((a, b) => a.position - b.position)
-  )
   const sortedCategories = computed(() =>
     categories.value.sort((a, b) => a.position - b.position)
   )
@@ -174,7 +168,7 @@ export const useServerStore = defineStore('server', () => {
 
   return {
     servers, currentServer, channels, categories, members, roles, invites, currentChannel,
-    textChannels, voiceChannels, sortedCategories, channelsByCategory,
+    sortedCategories, channelsByCategory,
     fetchServers, fetchServer, createServer, joinServer, deleteServer, leaveServer, updateServerProfile,
     createChannel, deleteChannel, updateChannel, createInvite, fetchInvites, refreshMembers, handleServerDeleted,
     createCategory, updateCategory, deleteCategory, setCurrentChannel, handleUserProfileUpdated

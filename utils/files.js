@@ -60,19 +60,3 @@ export function collectServerFiles(db, serverId) {
   }
   return [...names]
 }
-
-// 孤儿文件扫描：返回 uploads 目录中未被任何消息引用的文件名
-// 一次性构建引用集合，成本 O(消息数 + 目录文件数)
-export function scanOrphanFiles(db) {
-  const referenced = new Set()
-  for (const m of db.raw.messages) {
-    extractFileNames(m).forEach(n => referenced.add(n))
-  }
-  let entries = []
-  try {
-    entries = fs.readdirSync(uploadDir)
-  } catch {
-    return []
-  }
-  return entries.filter(name => !referenced.has(name))
-}

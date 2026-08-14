@@ -28,7 +28,6 @@ const EXCLUDE_FILES = new Set([
   'start.js',          // 单独内嵌到模板，不打包
   'start.bat',         // 单文件模式不需要旧启动器
   'Z80Z-chat.bat',      // 构建产物自身
-  'Z80Z-chat-DEMO.bat', // 演示版构建产物
   'package-lock.json', // 锁文件由引导层 npm install 时重新生成
   '.install-version'   // 安装标记由引导层安装/更新时写入
 ])

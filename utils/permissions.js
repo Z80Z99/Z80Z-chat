@@ -17,7 +17,7 @@ export function hasPermission(db, userId, serverId, permission) {
 }
 
 // 用户在该服务器的最高角色 position（无任何角色时为 -1）
-export function userMaxPosition(db, userId, serverId) {
+function userMaxPosition(db, userId, serverId) {
   const member = db.findMember(serverId, userId)
   if (!member) return -1
   let max = -1

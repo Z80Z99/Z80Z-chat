@@ -2,7 +2,7 @@
 // Z80Z-chat - 服务入口
 // 用途：Express + WebSocket 服务（CORS/JSON/路由/静态/SPA）
 //       含全局错误处理、优雅关闭、全局异常捕获、日志接入
-// 来源：Z80Z-chat v1.0.0 合法项目代码
+// 来源：Z80Z-chat 合法项目代码
 // 说明：如被杀毒软件误报（启发式误报），请将项目目录加入信任区
 // ============================================================
 import express from 'express'
@@ -33,6 +33,9 @@ import configRoutes from './routes/config.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+// 版本号与 package.json 保持一致（横幅/日志显示）
+const APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || '0.0.0'
 
 const app = express()
 const server = http.createServer(app)
@@ -137,7 +140,7 @@ const bannerBot = '  ╚' + '═'.repeat(36) + '╝'
 
 server.listen(config.port, config.host, () => {
   console.log(`\n${bannerTop}`)
-  console.log(bannerLine(`${config.siteName} v1.0.0`))
+  console.log(bannerLine(`${config.siteName} v${APP_VERSION}`))
   console.log(bannerLine('Discord-style Community Chat'))
   console.log(bannerMid)
   console.log(bannerLine(`Server: http://localhost:${config.port}`))
@@ -147,7 +150,7 @@ server.listen(config.port, config.host, () => {
   console.log(`  数据目录: ${dataDir}`)
   console.log(`  上传目录: ${uploadDir}`)
   console.log(`  配置来源: config.json（部署脚本 start.js 管理端口与防火墙）\n`)
-  logger.info(`服务启动成功: http://localhost:${config.port}（${config.siteName} v1.0.0）`)
+  logger.info(`服务启动成功: http://localhost:${config.port}（${config.siteName} v${APP_VERSION}）`)
 })
 
 /* ────────────────────────── 优雅关闭 ────────────────────────── */

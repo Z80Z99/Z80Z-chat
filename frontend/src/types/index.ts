@@ -99,8 +99,3 @@ export interface FriendRelation {
   direction: 'incoming' | 'outgoing'
   friend: User | null
 }
-
-export interface WSMessage {
-  type: string
-  [key: string]: any
-}

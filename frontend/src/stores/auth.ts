@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { api } from '../utils/api'
 import { ws } from '../utils/ws'
 import type { User } from '../types'
@@ -7,8 +7,6 @@ import type { User } from '../types'
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const loading = ref(false)
-
-  const isLoggedIn = computed(() => !!user.value)
 
   async function fetchMe() {
     try {
@@ -53,5 +51,5 @@ export const useAuthStore = defineStore('auth', () => {
     return res
   }
 
-  return { user, loading, isLoggedIn, fetchMe, login, register, logout, updateProfile }
+  return { user, loading, fetchMe, login, register, logout, updateProfile }
 })

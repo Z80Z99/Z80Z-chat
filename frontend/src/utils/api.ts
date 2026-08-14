@@ -77,9 +77,6 @@ export const api = {
   createChannel(data: any) {
     return request('/channels/create', { method: 'POST', body: JSON.stringify(data) })
   },
-  getChannels(serverId: string) {
-    return request(`/channels/list/${serverId}`)
-  },
   updateChannel(id: string, data: any) {
     return request(`/channels/${id}`, { method: 'PUT', body: JSON.stringify(data) })
   },
@@ -118,9 +115,6 @@ export const api = {
   createRole(data: any) {
     return request('/roles/create', { method: 'POST', body: JSON.stringify(data) })
   },
-  getRoles(serverId: string) {
-    return request(`/roles/list/${serverId}`)
-  },
   updateRole(id: string, data: any) {
     return request(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) })
   },
@@ -131,12 +125,6 @@ export const api = {
   // Members
   getMembers(serverId: string) {
     return request(`/members/list/${serverId}`)
-  },
-  setMemberRole(data: any) {
-    return request('/members/set-role', { method: 'POST', body: JSON.stringify(data) })
-  },
-  removeMemberRole(data: any) {
-    return request('/members/remove-role', { method: 'POST', body: JSON.stringify(data) })
   },
   kickMember(data: any) {
     return request('/members/kick', { method: 'POST', body: JSON.stringify(data) })

@@ -115,10 +115,6 @@ class WSClient {
   onReconnect(callback: () => void) {
     this.reconnectCallbacks.push(callback)
   }
-
-  get connected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
-  }
 }
 
 export const ws = new WSClient()

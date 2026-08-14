@@ -52,7 +52,7 @@ export async function waitForDB(predicate, timeoutMs = 5000) {
   throw new Error('waitForDB 超时：db.json 未满足条件')
 }
 
-export async function waitReady() {
+async function waitReady() {
   for (let i = 0; i < 60; i++) {
     if (proc && proc.exitCode !== null) {
       throw new Error('server exited early:\n' + logs.slice(-800))
@@ -106,11 +106,6 @@ export async function api(pathname, { method = 'GET', body, token } = {}) {
 export async function register(username, password = 'test1234') {
   const r = await api('/auth/register', { method: 'POST', body: { username, password } })
   if (r.status !== 200) throw new Error('register failed: ' + JSON.stringify(r.data))
-  return r.data
-}
-
-export async function login(username, password = 'test1234') {
-  const r = await api('/auth/login', { method: 'POST', body: { username, password } })
   return r.data
 }
 

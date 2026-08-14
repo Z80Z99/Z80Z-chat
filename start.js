@@ -1048,21 +1048,6 @@ async function clearData() {
 
 /* ────────────────────────── 界面：部署 ────────────────────────── */
 
-async function buildFrontend() {
-  cls()
-  header('构建前端', 'npm run build')
-  log('开始构建 ...')
-  try {
-    execSync('npm run build', { cwd: projectRoot, stdio: 'inherit' })
-    log(ok('前端构建完成'))
-    return true
-  } catch {
-    log(bad('前端构建失败'))
-    await waitKey()
-    return false
-  }
-}
-
 async function deploy() {
   cls()
   // 启动前重新读取 config.json：编辑配置后无需重启管理程序即生效

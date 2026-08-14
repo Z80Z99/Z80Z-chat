@@ -7,7 +7,7 @@ import config, { dataDir } from '../config/index.js'
 let cachedSecret = null
 
 // 签名密钥：config.uploadSecret 优先，否则自动生成持久化到 data/.upload-secret
-export function getUploadSecret() {
+function getUploadSecret() {
   if (cachedSecret) return cachedSecret
   if (config.uploadSecret) {
     cachedSecret = String(config.uploadSecret)

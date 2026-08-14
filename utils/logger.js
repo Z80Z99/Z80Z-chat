@@ -18,7 +18,7 @@ export function getLogDir() {
 }
 
 // 轮转阈值：默认 5MB，可通过环境变量覆盖（测试用）
-export function getMaxSize() {
+function getMaxSize() {
   const v = Number(process.env.LOG_MAX_SIZE)
   return Number.isInteger(v) && v > 0 ? v : DEFAULT_MAX_SIZE
 }

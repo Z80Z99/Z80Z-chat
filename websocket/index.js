@@ -156,8 +156,7 @@ export function handleWebSocket(wss, db) {
 
         case 'voice-offer':
         case 'voice-answer':
-        case 'voice-ice-candidate':
-        case 'screen-refresh': {
+        case 'voice-ice-candidate': {
           const targetRoom = voiceRooms.get(data.roomId)
           // 信令隔离：发送者必须是该房间成员（否则可向房间内任意成员注入伪造信令）
           if (targetRoom && targetRoom.has(user.id)) {

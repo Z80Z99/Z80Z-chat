@@ -8,7 +8,6 @@ export const useVoiceStore = defineStore('voice', () => {
   const currentRoom = ref<string | null>(null)
   const participants = ref<string[]>([])
   const voiceRoomMembers = ref<Record<string, string[]>>({})
-  const speakingUsers = ref<Set<string>>(new Set())
   const isMuted = ref(false)
   const isDeafened = ref(false)
   const localStream = ref<MediaStream | null>(null)
@@ -49,7 +48,6 @@ export const useVoiceStore = defineStore('voice', () => {
     ts: number
   }
   const remoteScreens = ref<RemoteScreenEntry[]>([])
-  const screenDebug = ref<{ userId: string; items: string[] }[]>([])
 
   let iceServersCache: RTCIceServer[] | null = null
   const fallbackIceServers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -65,17 +63,6 @@ export const useVoiceStore = defineStore('voice', () => {
       }
     } catch {}
     iceServersCache = fallbackIceServers
-  }
-
-  function pushScreenDebug(userId: string, msg: string) {
-    const existing = screenDebug.value.find(d => d.userId === userId)
-    const line = `[${new Date().toLocaleTimeString()}] ${msg}`
-    if (existing) {
-      existing.items.push(line)
-      if (existing.items.length > 8) existing.items.shift()
-    } else {
-      screenDebug.value.push({ userId, items: [line] })
-    }
   }
 
   const connectionStats = ref({
@@ -483,7 +470,6 @@ export const useVoiceStore = defineStore('voice', () => {
     pendingCandidates.clear()
     screenSenders.value.clear()
     remoteScreens.value = []
-    screenDebug.value = []
     outputAnalysers.forEach(({ src }) => src.disconnect())
     outputAnalysers.clear()
     outputCtx?.close().catch(() => {})
@@ -497,7 +483,6 @@ export const useVoiceStore = defineStore('voice', () => {
     }
     currentRoom.value = null
     participants.value = []
-    speakingUsers.value.clear()
     micAvailable.value = true
     micError.value = ''
     isMuted.value = false
@@ -578,18 +563,8 @@ export const useVoiceStore = defineStore('voice', () => {
       }
       if (preferred.length) {
         sender.setCodecPreferences(preferred)
-        pushScreenDebug('', `发送端编码优先: ${preferred.map(c => c.mimeType.split('/')[1]).join(', ')}`)
       }
     } catch {}
-  }
-
-  function getReceiverCodec(pc: RTCPeerConnection, track: MediaStreamTrack): string {
-    try {
-      const receiver = pc.getReceivers().find(r => r.track === track)
-      return receiver?.getParameters?.()?.codecs?.[0]?.mimeType || 'unknown'
-    } catch {
-      return 'unknown'
-    }
   }
 
   async function startScreenShare(opts: { width?: number; fps?: number } = {}) {
@@ -645,7 +620,6 @@ export const useVoiceStore = defineStore('voice', () => {
         }
       }
 
-      pushScreenDebug('', `投屏开始 ${sourceResolution.value.width}x${sourceResolution.value.height}@${fps}fps · 码率上限 ${(bitrateLimit / 1_000_000).toFixed(1)}Mbps`)
       ws.send({ type: 'screen-share-start', roomId: currentRoom.value })
     } catch {
       screenStream.value = null
@@ -742,7 +716,6 @@ export const useVoiceStore = defineStore('voice', () => {
 
       // 重应用当前画质/码率到新轨
       await changeShareQuality(currentShareOpts.value)
-      pushScreenDebug('', `切换投屏源 → ${sourceResolution.value.width}x${sourceResolution.value.height}`)
     } catch {
       // 用户取消选择器：保持原投屏不变
     } finally {
@@ -885,7 +858,6 @@ export const useVoiceStore = defineStore('voice', () => {
         if (next < bitrateLimit) {
           bitrateLimit = next
           applySenderBitrate(bitrateLimit)
-          pushScreenDebug('', `自适应降码率 → ${(bitrateLimit / 1_000_000).toFixed(2)}Mbps（loss=${connectionStats.value.outLossRate}% rtt=${connectionStats.value.rtt}ms）`)
         }
       } else if (good) {
         // 升档需连续 3 次好质量，避免抖动
@@ -895,7 +867,6 @@ export const useVoiceStore = defineStore('voice', () => {
           if (next > bitrateLimit) {
             bitrateLimit = next
             applySenderBitrate(bitrateLimit)
-            pushScreenDebug('', `自适应升码率 → ${(bitrateLimit / 1_000_000).toFixed(2)}Mbps`)
           }
           goodQualityStreak = 0
         }
@@ -1033,9 +1004,6 @@ export const useVoiceStore = defineStore('voice', () => {
         } catch {}
       } else if (track.kind === 'video') {
         const stream = event.streams[0] || new MediaStream([track])
-        const settings = track.getSettings()
-        const codec = getReceiverCodec(pc!, track)
-        pushScreenDebug(userId, `收到视频轨 codec=${codec} ${settings.width || '?'}x${settings.height || '?'}`)
         remoteScreens.value = [
           ...remoteScreens.value.filter(e => e.userId !== userId),
           { userId, stream, ts: Date.now() }
@@ -1049,7 +1017,6 @@ export const useVoiceStore = defineStore('voice', () => {
     pc.onconnectionstatechange = () => {
       if (pc!.connectionState === 'disconnected' || pc!.connectionState === 'failed') {
         remoteScreens.value = remoteScreens.value.filter(e => e.userId !== userId)
-        pushScreenDebug(userId, `连接状态: ${pc!.connectionState}`)
       }
     }
 
@@ -1108,7 +1075,6 @@ export const useVoiceStore = defineStore('voice', () => {
         ws.send({ type: 'voice-offer', roomId: currentRoom.value, targetUserId: userId, data: offer })
       } catch {}
     }
-    pushScreenDebug('', `请求画面刷新 (iceRestart)`)
   }
 
   function handleVoiceRoomMembers(data: any) {
@@ -1179,8 +1145,8 @@ export const useVoiceStore = defineStore('voice', () => {
   }
 
   return {
-    currentRoom, participants, voiceRoomMembers, speakingUsers, isMuted, isDeafened, localStream,
-    micAvailable, micError, screenStream, isScreenSharing, remoteScreens, screenDebug,
+    currentRoom, participants, voiceRoomMembers, isMuted, isDeafened, localStream,
+    micAvailable, micError, screenStream, isScreenSharing, remoteScreens,
     connectionStats, sharePresets, currentShareOpts, sourceResolution,
     inputDevices, outputDevices, inputDeviceId, outputDeviceId, inputVolume, outputVolume,
     outputSelectionSupported, screenShareSupported, inputLevel, outputLevel,
