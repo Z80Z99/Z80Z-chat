@@ -586,6 +586,28 @@ export const useVoiceStore = defineStore('voice', () => {
       // 告知编码器这是屏幕内容（优先清晰度/文字），而非摄像头
       try { track.contentHint = 'detail' } catch {}
 
+      // 强制应用所选画质/帧率：getDisplayMedia 的 ideal 约束不保证生效，
+      // 用 exact 约束强制，源不支持时回退 ideal（与 changeShareQuality 一致）
+      if (preset.w > 0 && preset.h > 0) {
+        try {
+          await track.applyConstraints({
+            width: { exact: preset.w },
+            height: { exact: preset.h },
+            frameRate: fps > 0 ? { exact: fps } : undefined
+          })
+        } catch {
+          try {
+            await track.applyConstraints({
+              width: { ideal: preset.w },
+              height: { ideal: preset.h },
+              frameRate: fps > 0 ? { ideal: fps } : undefined
+            })
+          } catch {}
+        }
+      } else if (fps > 0) {
+        try { await track.applyConstraints({ frameRate: { ideal: fps } }) } catch {}
+      }
+
       const settings = track.getSettings()
       sourceResolution.value = { width: settings.width || preset.w || 1920, height: settings.height || preset.h || 1080 }
 
@@ -1026,6 +1048,22 @@ export const useVoiceStore = defineStore('voice', () => {
 
   async function createOffer(userId: string) {
     if (!currentRoom.value) return
+    // 投屏中：对端重连（voice-user-joined / 新成员加入）时强制重建 pc，
+    // 让 getOrCreatePeerConnection 重新 addTrack 投屏视频轨并协商过去，
+    // 否则对端重建连接后收不到投屏画面
+    if (isScreenSharing.value && screenStream.value) {
+      const old = peerConnections.value.get(userId)
+      if (old) {
+        try { old.close() } catch {}
+        peerConnections.value.delete(userId)
+        screenSenders.value.delete(userId)
+      }
+      const pc = getOrCreatePeerConnection(userId)
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      ws.send({ type: 'voice-offer', roomId: currentRoom.value, targetUserId: userId, data: offer })
+      return
+    }
     const pc = getOrCreatePeerConnection(userId)
     // 协商在途或已建立连接则跳过，避免重复/冲突 offer
     if (pc.signalingState !== 'stable') return

@@ -28,11 +28,11 @@ before(async () => {
 
 after(stopServer)
 
-test('普通成员获取邀请列表时 code 被隐藏', async () => {
+test('普通成员可查看完整 code', async () => {
   const r = await api('/invites/list/' + server.id, { token: member.token })
   assert.equal(r.status, 200)
   assert.ok(r.data.invites.length > 0)
-  assert.equal(r.data.invites[0].code, null)
+  assert.match(r.data.invites[0].code, /^\d{10}$/)
 })
 
 test('owner 可以查看完整 code', async () => {
@@ -52,9 +52,13 @@ test('非成员无法获取邀请列表', async () => {
   assert.equal(r.status, 403)
 })
 
-test('普通成员创建邀请被拒绝', async () => {
-  const r = await api('/invites/create', { method: 'POST', body: { serverId: server.id }, token: member.token })
-  assert.equal(r.status, 403)
+test('普通成员可创建邀请（有效期固定 1 小时）', async () => {
+  const r = await api('/invites/create', { method: 'POST', body: { serverId: server.id, expiresInHours: 24 }, token: member.token })
+  assert.equal(r.status, 200)
+  assert.ok(r.data.invite.code)
+  // 普通成员忽略传入有效期，强制 1 小时
+  const diffH = (new Date(r.data.invite.expiresAt) - Date.now()) / 3600000
+  assert.ok(diffH > 0.9 && diffH < 1.1, 'expiresAt 应约 1 小时: ' + r.data.invite.expiresAt)
 })
 
 test('manageServer 成员可以创建邀请', async () => {

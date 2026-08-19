@@ -22,6 +22,8 @@ let autoRefreshed = false
 let frameTick = 0
 let lastSec = 0
 let lastCurrentTime = -1
+let playRetry = 0
+const PLAY_RETRY_MAX = 5
 
 function setStatus(s: typeof status.value) {
   if (status.value !== s) status.value = s
@@ -33,11 +35,18 @@ function tryPlay() {
   const p = el.play()
   if (p) {
     p.then(() => {
+      playRetry = 0
       paused.value = false
     }).catch(() => {
-      paused.value = true
-      if (status.value === 'black' || status.value === 'error') return
-      setStatus('waiting')
+      // 远程轨道首帧未就绪时 play() 会 reject：延迟自动重试，避免卡在"点击播放"
+      if (playRetry < PLAY_RETRY_MAX) {
+        playRetry++
+        setTimeout(tryPlay, 500)
+      } else {
+        paused.value = true
+        if (status.value === 'black' || status.value === 'error') return
+        setStatus('waiting')
+      }
     })
   }
 }
@@ -149,6 +158,7 @@ function bind() {
     el.srcObject = props.stream
     autoRefreshed = false
     blackSince = 0
+    playRetry = 0
     setStatus('waiting')
   }
   startFrameDetection()

@@ -12,9 +12,13 @@ router.post('/create', authMiddleware, (req, res) => {
 
   const server = db.findServer(serverId)
   if (!server) return res.status(404).json({ error: '服务器不存在' })
-  if (server.ownerId !== req.user.id && !hasPermission(db, req.user.id, serverId, 'manageServer')) {
-    return res.status(403).json({ error: '没有管理服务器的权限' })
-  }
+
+  const member = db.findMember(serverId, req.user.id)
+  if (!member) return res.status(403).json({ error: '你不是该服务器成员' })
+
+  // 普通成员发布的邀请码固定 1 小时有效（防止滥用）；管理员可自定义有效期
+  const isManager = server.ownerId === req.user.id || hasPermission(db, req.user.id, serverId, 'manageServer')
+  const effExpires = (isManager && expiresInHours) ? expiresInHours : 1
 
   const invite = {
     id: genId(),
@@ -23,7 +27,7 @@ router.post('/create', authMiddleware, (req, res) => {
     creatorId: req.user.id,
     maxUses: maxUses || null,
     uses: 0,
-    expiresAt: expiresInHours ? new Date(Date.now() + expiresInHours * 3600000).toISOString() : null,
+    expiresAt: new Date(Date.now() + effExpires * 3600000).toISOString(),
     createdAt: now()
   }
   db.createInvite(invite)
@@ -63,13 +67,7 @@ router.get('/list/:serverId', authMiddleware, (req, res) => {
   const member = db.findMember(req.params.serverId, req.user.id)
   if (!member) return res.status(403).json({ error: '你不是该服务器成员' })
 
-  // 脱敏：仅 owner / manageServer 权限可见完整 code，普通成员隐藏
-  const canViewCodes = hasPermission(db, req.user.id, req.params.serverId, 'manageServer')
-  const invites = db.findInvitesByServer(req.params.serverId).map(inv => {
-    if (canViewCodes) return inv
-    const { code, ...rest } = inv
-    return { ...rest, code: null }
-  })
+  const invites = db.findInvitesByServer(req.params.serverId)
   res.json({ invites })
 })
 
