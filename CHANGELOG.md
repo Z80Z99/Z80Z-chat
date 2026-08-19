@@ -1,5 +1,23 @@
 # Changelog
 
+## Z80Z-chat v1.0.5（2026-08-14）
+
+自更新体验修复、无用代码清理、管理菜单增强。
+
+### 修复
+
+- **自更新检查黑屏等待**：检查移入已安装项目分支（首次安装不再联网检查，零等待）；新增 24 小时检查频率缓存（`.last-check` 时间戳）；线路改为镜像优先（ghproxy → gh-proxy → 官方），超时 8s → 5s
+- **npm install 残留日志**：安装成功后自动清理 `.npm-out-*.txt`
+
+### 新增
+
+- **前台运行菜单「返回主菜单」**：服务前台运行时选 0，服务转入后台继续运行并回到主菜单
+
+### 清理
+
+- 删除无用文件与代码：demo 工具链（build-demo / demo-bootstrap / demo-start / 模板）、一次性工具（restore-template / test-screen-fullscreen）、未使用函数（buildFrontend / scanOrphanFiles / screen-refresh relay 等）、前端未使用方法与死状态（speakingUsers / screenDebug / isLoggedIn 等）
+- server.js 版本号动态读取 package.json（横幅/日志不再硬编码）
+
 ## Z80Z-chat v1.0.4（2026-08-14）
 
 启动器（bat）自动更新。

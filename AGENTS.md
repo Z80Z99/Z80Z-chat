@@ -131,10 +131,11 @@ z80z-chat/
 
 ## 当前状态（上次会话结束时）
 
-- 版本 v1.0.4（启动器自动更新，发布准备中）
-- 启动器自更新：`Invoke-SelfUpdate`（deploy/install.template.bat）在 main 流程 Resolve-InstallRoot 后调用，三线路（GitHub/ghproxy.net/gh-proxy.com）下载 latest bat → `Read-BatVersion` 读 APP_VERSION → `Compare-Version` 比较 → 确认后 `Copy-BatPreferences` 保留偏好块 → 独立延迟 PS 进程（UTF-8 BOM，Move-Item -LiteralPath）退出后替换 `$BatFile`
-- 约束：bat 替换必须在 cmd 读完 EOF 后由独立进程做（避开 Set-BatPreferenceSafe 等长写入冲突）；自更新代码 PS 块不含 %/!；demo 版本（带 - 后缀）跳过自更新
+- 版本 v1.0.5（发布准备中）
+- 启动器自更新：`Invoke-SelfUpdate` 仅在已安装项目分支调用（首次安装零等待）；24h 检查频率缓存（`.last-check` 时间戳文件写 bat 同目录，写失败静默）；线路镜像优先；超时 5s
+- 前台运行菜单含「0 返回主菜单」（服务转入后台继续运行并返回主菜单）；npm install 成功后清理 `.npm-out-*` 残留
 - 语音：WebRTC mesh + perfect negotiation（userId 大小定 polite/impolite）；ICE pending 缓存；iceServers 含 STUN + 公共 TURN（自建 coturn 见 config.json 注释）
+- 仓库还有独立分支 friend-easter-egg（朋友恶搞彩蛋，不影响 master，勿合并）
 
 ## 修改约定
 
