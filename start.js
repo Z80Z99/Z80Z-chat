@@ -291,6 +291,127 @@ function spawnBackground() {
   return child.pid
 }
 
+/* ────────────────────────── 系统托盘（后台运行管理） ────────────────────────── */
+
+function isProcessAlive(pid) {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+// 生成托盘脚本（NotyfiIcon，右键菜单：打开面板 / 停止服务 / 退出托盘；服务停止后自动退出）
+function buildTrayScript() {
+  const node = process.execPath
+  const proj = projectRoot
+  const pidFile = PID_FILE
+  const site = config.siteName
+  const q = (s) => s.replace(/'/g, "''")
+  return `param(
+  [string]$Node = '${q(node)}',
+  [string]$Project = '${q(proj)}',
+  [string]$PidFile = '${q(pidFile)}',
+  [string]$SiteName = '${q(site)}'
+)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+function Test-Service {
+  if (-not (Test-Path -LiteralPath $PidFile)) { return $false }
+  try {
+    $p = [int](([System.IO.File]::ReadAllText($PidFile)).Trim())
+    if ($p -le 0) { return $false }
+    return [bool](Get-Process -Id $p -ErrorAction SilentlyContinue)
+  } catch { return $false }
+}
+
+function Stop-ServiceNow {
+  try {
+    $p = [int](([System.IO.File]::ReadAllText($PidFile)).Trim())
+    if ($p -gt 0) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
+  } catch {}
+}
+
+function Open-Panel {
+  try {
+    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('cd /d "' + $Project + '" && "' + $Node + '" start.js') -WindowStyle Normal
+  } catch {}
+}
+
+$tray = New-Object System.Windows.Forms.NotifyIcon
+$bmp = New-Object System.Drawing.Bitmap 16,16
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.Clear([System.Drawing.Color]::FromArgb(255, 88, 101, 242))
+$g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)), 4, 3, 8, 10)
+$g.Dispose()
+$icon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+$tray.Icon = $icon
+$tray.Text = $SiteName + ' 服务运行中'
+$tray.Visible = $true
+
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$openItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$openItem.Text = '打开管理面板'
+$openItem.Add_Click({ Open-Panel })
+$stopItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$stopItem.Text = '停止服务并退出'
+$stopItem.Add_Click({ Stop-ServiceNow; $tray.Visible = $false; $tray.Dispose(); [System.Windows.Forms.Application]::Exit() })
+$exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$exitItem.Text = '退出托盘（服务继续运行）'
+$exitItem.Add_Click({ $tray.Visible = $false; $tray.Dispose(); [System.Windows.Forms.Application]::Exit() })
+$menu.Items.Add($openItem)
+$menu.Items.Add($stopItem)
+$menu.Items.Add($exitItem)
+$tray.ContextMenuStrip = $menu
+
+$tray.Add_MouseClick({
+  param($sender, $e)
+  if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { $tray.ShowContextMenu() }
+})
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 5000
+$timer.Add_Tick({
+  if (-not (Test-Service)) {
+    $timer.Stop()
+    $tray.Visible = $false
+    $tray.Dispose()
+    [System.Windows.Forms.Application]::Exit()
+  }
+})
+$timer.Start()
+
+[System.Windows.Forms.Application]::Run()
+`
+}
+
+// 确保系统托盘在运行（已存在则跳过；生成脚本时写 UTF-8 BOM，PS 5.1 才能正确读中文）
+function ensureTray() {
+  try {
+    const trayPidFile = path.join(outerRoot, '.z80z-tray.pid')
+    if (fs.existsSync(trayPidFile)) {
+      const tp = Number(fs.readFileSync(trayPidFile, 'utf8').trim())
+      if (Number.isInteger(tp) && tp > 0 && isProcessAlive(tp)) return
+    }
+    const psFile = path.join(outerRoot, '.z80z-tray.ps1')
+    fs.writeFileSync(psFile, '\uFEFF' + buildTrayScript(), 'utf8')
+    const tray = spawn('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', psFile
+    ], { detached: true, stdio: 'ignore', windowsHide: true })
+    tray.unref()
+    try { fs.writeFileSync(trayPidFile, String(tray.pid)) } catch {}
+  } catch {}
+}
+
+// 停止托盘进程（服务停止时调用；托盘自身也会在服务停止后自动退出）
+function killTray() {
+  try {
+    const trayPidFile = path.join(outerRoot, '.z80z-tray.pid')
+    if (fs.existsSync(trayPidFile)) {
+      const tp = Number(fs.readFileSync(trayPidFile, 'utf8').trim())
+      if (Number.isInteger(tp) && tp > 0) killPid(tp)
+      fs.unlinkSync(trayPidFile)
+    }
+  } catch {}
+}
+
 function waitForServer(port, timeoutMs = 8000) {
   const start = Date.now()
   return new Promise((resolve) => {
@@ -984,6 +1105,7 @@ async function stopService() {
   if (stopped) {
     log(ok(`服务已停止（${src}）`))
     try { fs.unlinkSync(PID_FILE) } catch {}
+    killTray()
     // 停止后删除防火墙规则，防止端口被外部利用
     if (config.firewall?.enabled !== false && config.firewall?.ruleName) {
       removeFirewall(config.firewall.ruleName)
@@ -1022,6 +1144,8 @@ async function clearData() {
     log('停止服务 ...')
     killPort(config.port)
     await new Promise(r => setTimeout(r, 500))
+    try { fs.unlinkSync(PID_FILE) } catch {}
+    killTray()
     // 清档停止服务后一并删除防火墙规则
     if (config.firewall?.enabled !== false && config.firewall?.ruleName) {
       removeFirewall(config.firewall.ruleName)
@@ -1243,9 +1367,10 @@ async function runningMenu(child = null, isBackground = false) {
             killPid(child.pid)
             await new Promise(r => setTimeout(r, 800))
             const pid = spawnBackground()
+            ensureTray()
             console.log('')
             log(ok(`服务已转入后台运行（PID ${pid}）`))
-            log(dim('  可以安全关闭此窗口'))
+            log(dim('  已生成系统托盘图标，可右键打开面板或停止服务'))
             console.log('')
             rl.close()
             process.exit(0)
@@ -1260,6 +1385,7 @@ async function runningMenu(child = null, isBackground = false) {
               else log(dim('服务可能已自行退出'))
             }
             try { fs.unlinkSync(PID_FILE) } catch {}
+            killTray()
             if (config.firewall?.enabled !== false && config.firewall?.ruleName) {
               removeFirewall(config.firewall.ruleName)
             }
@@ -1272,6 +1398,7 @@ async function runningMenu(child = null, isBackground = false) {
             killPid(child.pid)
             await new Promise(r => setTimeout(r, 800))
             const pid = spawnBackground()
+            ensureTray()
             console.log('')
             log(ok(`服务已转入后台运行（PID ${pid}）`))
             console.log('')
@@ -2388,9 +2515,10 @@ async function main() {
     console.log(yellow('  (调试模式：已跳过防火墙配置 --no-firewall)'))
   }
   
-  // 检测后台服务，有则直接进入运行中菜单
+  // 检测后台服务，有则直接进入运行中菜单（并确保系统托盘图标存在）
   const status = checkServiceStatus()
   if (status.status === 'running') {
+    ensureTray()
     await runningMenu(null, true)
   }
 
