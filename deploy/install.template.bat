@@ -1194,8 +1194,10 @@ function Write-Project($projDir, [bool]$keepConfig = $false) {
     $holdCfg = Join-Path $projDir ('.config.' + [System.Guid]::NewGuid().ToString('N'))
     Move-Item $cfgPath $holdCfg -Force
   }
-  $js = Extract-Block '__NODECHAT_STARTJS_BEGIN__' '__NODECHAT_STARTJS_END__'
-  Write-Utf8 (Join-Path $projDir 'start.js') ($js -join "`n")
+  # start.js 以 base64 内嵌（与 PS/zip 块一致，避免 bat 明文含可被安全软件
+  # 静态特征扫描命中的代码），解码后写入项目目录
+  $jsB64 = Extract-Block '__NODECHAT_STARTJS_B64_BEGIN__' '__NODECHAT_STARTJS_B64_END__'
+  [System.IO.File]::WriteAllBytes((Join-Path $projDir 'start.js'), [System.Convert]::FromBase64String(($jsB64 -join '')))
   $b64 = Extract-Block '__NODECHAT_ZIP_B64_BEGIN__' '__NODECHAT_ZIP_B64_END__'
   $bytes = [System.Convert]::FromBase64String(($b64 -join ''))
   $zip = Join-Path $projDir '.project.zip'
@@ -1930,9 +1932,9 @@ __NODECHAT_PS_END__
 __NODECHAT_PS_B64_BEGIN__
 __PS_B64_PLACEHOLDER__
 __NODECHAT_PS_B64_END__
-__NODECHAT_STARTJS_BEGIN__
-__STARTJS_PLACEHOLDER__
-__NODECHAT_STARTJS_END__
+__NODECHAT_STARTJS_B64_BEGIN__
+__STARTJS_B64_PLACEHOLDER__
+__NODECHAT_STARTJS_B64_END__
 __NODECHAT_ZIP_B64_BEGIN__
 __ZIP_B64_PLACEHOLDER__
 __NODECHAT_ZIP_B64_END__

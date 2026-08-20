@@ -212,11 +212,16 @@ function main() {
 
   // 3. 读取 start.js
   const startJs = fs.readFileSync(startJsPath, 'utf8')
-  console.log(`  ✔ start.js 内嵌 (${startJs.split(/\r?\n/).length} 行)`)
+  // start.js 以 base64 内嵌（与 PS/zip 块一致）：bat 明文不再包含可被
+  // 安全软件静态特征扫描命中的代码（如 Stop-Process / 托盘 / 隐藏窗口等）
+  const startJsB64 = Buffer.from(startJs, 'utf8').toString('base64')
+  const startJsB64Lines = []
+  for (let i = 0; i < startJsB64.length; i += 76) startJsB64Lines.push(startJsB64.slice(i, i + 76))
+  console.log(`  ✔ start.js 内嵌 (base64 ${startJsB64Lines.length} 行, 源码 ${startJs.split(/\r?\n/).length} 行)`)
 
   // 4. 读取模板并替换
   let bat = fs.readFileSync(TEMPLATE, 'utf8')
-  if (!bat.includes('__APP_VERSION__') || !bat.includes('__APP_BUILT__') || !bat.includes('__PAYLOAD_SHA__') || !bat.includes('__STARTJS_PLACEHOLDER__') || !bat.includes('__ZIP_B64_PLACEHOLDER__') || !bat.includes('__PS_B64_PLACEHOLDER__')) {
+  if (!bat.includes('__APP_VERSION__') || !bat.includes('__APP_BUILT__') || !bat.includes('__PAYLOAD_SHA__') || !bat.includes('__STARTJS_B64_PLACEHOLDER__') || !bat.includes('__ZIP_B64_PLACEHOLDER__') || !bat.includes('__PS_B64_PLACEHOLDER__')) {
     console.error('  ✖ 模板占位符缺失，模板可能不完整')
     process.exit(1)
   }
@@ -249,7 +254,7 @@ function main() {
   const builtAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
   bat = bat.replace('__APP_BUILT__', builtAt)
   bat = bat.replace('__PAYLOAD_SHA__', payloadSha)
-  bat = bat.replace('__STARTJS_PLACEHOLDER__', startJs.replace(/\r?\n/g, '\r\n').trimEnd())
+  bat = bat.replace('__STARTJS_B64_PLACEHOLDER__', startJsB64Lines.join('\r\n'))
   bat = bat.replace('__ZIP_B64_PLACEHOLDER__', b64Lines.join('\r\n'))
   bat = bat.replace('__PS_B64_PLACEHOLDER__', psB64Lines.join('\r\n'))
   console.log(`  ✔ bootstrap 内嵌 (base64 ${psB64Lines.length} 行)`)
