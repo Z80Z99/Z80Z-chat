@@ -304,81 +304,45 @@ function buildTrayScript() {
   const pidFile = PID_FILE
   const site = config.siteName
   const q = (s) => s.replace(/'/g, "''")
-  return `param(
-  [string]$Node = '${q(node)}',
-  [string]$Project = '${q(proj)}',
-  [string]$PidFile = '${q(pidFile)}',
-  [string]$SiteName = '${q(site)}'
-)
+  return `param()
 $ErrorActionPreference = 'Continue'
 
-# 原生 Shell_NotifyIcon 托盘（C# NativeWindow + 固定 GUID + NOTIFYICON_VERSION_4）
-# 参考 DeepSeek-Harness 的实现：比 WinForms NotifyIcon 更不易被安全软件行为拦截
 $TrayCs = @'
 using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
-
 public class Z80Tray : NativeWindow {
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-  public struct NOTIFYICONDATA {
-    public int cbSize;
-    public IntPtr hWnd;
-    public int uID;
-    public uint uFlags;
-    public uint uCallbackMessage;
-    public IntPtr hIcon;
+  public struct NID {
+    public int cbSize; public IntPtr hWnd; public int uID; public uint uFlags;
+    public uint uCallbackMessage; public IntPtr hIcon;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
-    public uint dwState;
-    public uint dwStateMask;
+    public uint dwState; public uint dwStateMask;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo;
     public uint uTimeoutOrVersion;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
-    public uint dwInfoFlags;
-    public Guid guidItem;
-    public IntPtr hBalloonIcon;
+    public uint dwInfoFlags; public Guid guidItem; public IntPtr hBalloonIcon;
   }
-  const uint NIM_ADD = 0;
-  const uint NIM_DELETE = 2;
-  const uint NIM_SETVERSION = 4;
-  const uint NIF_MESSAGE = 1;
-  const uint NIF_ICON = 2;
-  const uint NIF_TIP = 4;
-  const uint NIF_GUID = 0x20;
-  const uint NOTIFYICON_VERSION_4 = 4;
-  const int WM_USER = 0x400;
-  const int WM_LBUTTONDBLCLK = 0x0203;
-  const int WM_RBUTTONUP = 0x0205;
+  const uint NIM_ADD = 0; const uint NIM_DELETE = 2; const uint NIM_SETVERSION = 4;
+  const uint NIF_MESSAGE = 1; const uint NIF_ICON = 2; const uint NIF_TIP = 4; const uint NIF_GUID = 0x20;
+  const uint NOTIFYICON_VERSION_4 = 4; const int WM_USER = 0x400;
+  const int WM_LBUTTONDBLCLK = 0x0203; const int WM_RBUTTONUP = 0x0205;
   public static readonly Guid TrayGuid = new Guid("7C2F4A1B-9E3D-4C5A-B6F8-2D1E0A9B3C44");
   const int UID = 0x0D5;
-
   [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-  static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpData);
+  static extern bool Shell_NotifyIcon(uint m, ref NID n);
   [DllImport("user32.dll")]
   static extern bool SetForegroundWindow(IntPtr hWnd);
-
   public event Action DoubleClicked;
   ContextMenuStrip _menu;
-  IntPtr _hicon;
-
-  public Z80Tray(IntPtr iconHandle, string tip, ContextMenuStrip menu) {
-    _hicon = iconHandle;
+  public Z80Tray(IntPtr h, string tip, ContextMenuStrip menu) {
     _menu = menu;
     CreateHandle(new CreateParams());
-    NOTIFYICONDATA n = new NOTIFYICONDATA();
-    n.cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATA));
-    n.hWnd = Handle;
-    n.uID = UID;
-    n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID;
-    n.uCallbackMessage = WM_USER + 1;
-    n.hIcon = iconHandle;
-    n.szTip = tip;
-    n.guidItem = TrayGuid;
-    Shell_NotifyIcon(NIM_ADD, ref n);
-    n.uTimeoutOrVersion = NOTIFYICON_VERSION_4;
-    Shell_NotifyIcon(NIM_SETVERSION, ref n);
+    NID n = new NID(); n.cbSize = Marshal.SizeOf(typeof(NID)); n.hWnd = Handle; n.uID = UID;
+    n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID; n.uCallbackMessage = WM_USER + 1;
+    n.hIcon = h; n.szTip = tip; n.guidItem = TrayGuid;
+    Shell_NotifyIcon(NIM_ADD, ref n); n.uTimeoutOrVersion = NOTIFYICON_VERSION_4; Shell_NotifyIcon(NIM_SETVERSION, ref n);
   }
-
   protected override void WndProc(ref Message m) {
     if (m.Msg == WM_USER + 1) {
       int msg = (int)m.LParam & 0xFFFF;
@@ -393,10 +357,9 @@ public class Z80Tray : NativeWindow {
     }
     base.WndProc(ref m);
   }
-
   public void DisposeTray() {
-    NOTIFYICONDATA n = new NOTIFYICONDATA();
-    n.cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATA));
+    NID n = new NID();
+    n.cbSize = Marshal.SizeOf(typeof(NID));
     n.hWnd = Handle;
     n.uID = UID;
     n.uFlags = NIF_GUID;
@@ -407,37 +370,23 @@ public class Z80Tray : NativeWindow {
 }
 '@
 
-# 窗口标题 + 运行时隐藏（启动参数用 Minimized 规避安全软件对隐藏进程的拦截）
-try { $host.UI.RawUI.WindowTitle = $SiteName + ' 服务托盘' } catch {}
-function Hide-ConsoleWindow {
-  try {
-    $sig = '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
-    Add-Type -MemberDefinition $sig -Name Win32 -Namespace Native -ErrorAction SilentlyContinue
-    $proc = Get-Process -Id $PID
-    $proc.Refresh()
-    $hwnd = $proc.MainWindowHandle
-    if ($hwnd -ne 0) { [Native.Win32]::ShowWindow($hwnd, 0) }
-  } catch {}
-}
-Hide-ConsoleWindow
-
 function Test-Service {
-  if (-not (Test-Path -LiteralPath $PidFile)) { return $false }
+  if (-not (Test-Path -LiteralPath '${q(pidFile)}')) { return $false }
   try {
-    $p = [int](([System.IO.File]::ReadAllText($PidFile)).Trim())
+    $p = [int](([System.IO.File]::ReadAllText('${q(pidFile)}')).Trim())
     if ($p -le 0) { return $false }
     return [bool](Get-Process -Id $p -ErrorAction SilentlyContinue)
   } catch { return $false }
 }
 function Stop-ServiceNow {
   try {
-    $p = [int](([System.IO.File]::ReadAllText($PidFile)).Trim())
+    $p = [int](([System.IO.File]::ReadAllText('${q(pidFile)}')).Trim())
     if ($p -gt 0) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
   } catch {}
 }
 function Open-Panel {
   try {
-    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('cd /d "' + $Project + '" && "' + $Node + '" start.js') -WindowStyle Normal
+    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('cd /d "${q(proj)}" && "${q(node)}" start.js') -WindowStyle Normal
   } catch {}
 }
 
@@ -447,14 +396,11 @@ try {
   Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
   Add-Type -AssemblyName System.Drawing -ErrorAction Stop
   Add-Type -TypeDefinition $TrayCs -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing') -ErrorAction Stop
-
   $bmp = New-Object System.Drawing.Bitmap 16,16
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.Clear([System.Drawing.Color]::FromArgb(255, 88, 101, 242))
   $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)), 4, 3, 8, 10)
   $g.Dispose()
-  $hicon = $bmp.GetHicon()
-
   $menu = New-Object System.Windows.Forms.ContextMenuStrip
   $mOpen = New-Object System.Windows.Forms.ToolStripMenuItem('打开管理面板')
   $mOpen.add_Click({ Open-Panel })
@@ -465,10 +411,8 @@ try {
   [void]$menu.Items.Add($mOpen)
   [void]$menu.Items.Add($mStop)
   [void]$menu.Items.Add($mExit)
-
-  $tray = New-Object Z80Tray -ArgumentList @($hicon, $SiteName + ' 服务运行中', $menu)
+  $tray = New-Object Z80Tray -ArgumentList @($bmp.GetHicon(), '${q(site)} 服务运行中', $menu)
   $tray.add_DoubleClicked({ Open-Panel })
-
   $timer = New-Object System.Windows.Forms.Timer
   $timer.Interval = 5000
   $timer.add_Tick({
@@ -479,18 +423,19 @@ try {
     }
   })
   $timer.Start()
-
   [System.Windows.Forms.Application]::Run()
   $timer.Stop()
   $timer.Dispose()
 } catch {
-  # 托盘创建失败：窗口保持（用户可见），不隐藏
+  try { [System.IO.File]::AppendAllText((Join-Path $env:TEMP 'z80z-tray-err.log'), ('ERR: ' + $_.Exception.Message + [Environment]::NewLine)) } catch {}
 }
-try { if ($tray) { $tray.DisposeTray() } } catch {}
+if ($tray) { try { $tray.DisposeTray() } catch {} }
 `
 }
 
 // 确保系统托盘在运行（已存在则跳过；生成脚本时写 UTF-8 BOM，PS 5.1 才能正确读中文）
+// 卡巴斯基行为（已实测）：Hidden 启动 + 原生 Shell_NotifyIcon 可存活；
+// WinForms NotifyIcon + Hidden/Minimized 启动均被拦截终止
 function ensureTray() {
   try {
     const trayPidFile = path.join(outerRoot, '.z80z-tray.pid')
@@ -500,17 +445,14 @@ function ensureTray() {
     }
     const psFile = path.join(outerRoot, '.z80z-tray.ps1')
     fs.writeFileSync(psFile, '\uFEFF' + buildTrayScript(), 'utf8')
-    // 注意：不能用 -WindowStyle Hidden——卡巴斯基等安全软件会拦截
-    // "隐藏窗口 PowerShell 常驻 + NotifyIcon"行为并终止进程；用最小化窗口可正常存活
     const tray = spawn('powershell.exe', [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Minimized', '-File', psFile
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', psFile
     ], { detached: true, stdio: 'ignore', windowsHide: true })
     tray.unref()
     try { fs.writeFileSync(trayPidFile, String(tray.pid)) } catch {}
   } catch {}
 }
 
-// 停止托盘进程（服务停止时调用；托盘自身也会在服务停止后自动退出）
 function killTray() {
   try {
     const trayPidFile = path.join(outerRoot, '.z80z-tray.pid')
