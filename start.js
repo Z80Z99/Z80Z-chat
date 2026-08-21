@@ -434,6 +434,7 @@ try {
   try { [System.IO.File]::AppendAllText((Join-Path $env:TEMP 'z80z-tray-err.log'), ('ERR: ' + $_.Exception.Message + [Environment]::NewLine)) } catch {}
 }
 if ($tray) { try { $tray.DisposeTray() } catch {} }
+try { [System.IO.File]::Delete((Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '.z80z-tray.pid')) } catch {}
 `
 }
 
@@ -462,11 +463,15 @@ function ensureTray() {
 function killTray() {
   try {
     const trayPidFile = path.join(outerRoot, '.z80z-tray.pid')
+    const trayPsFile = path.join(outerRoot, '.z80z-tray.ps1')
+    const trayErrFile = path.join(outerRoot, '.z80z-tray.err.log')
     if (fs.existsSync(trayPidFile)) {
       const tp = Number(fs.readFileSync(trayPidFile, 'utf8').trim())
       if (Number.isInteger(tp) && tp > 0) killPid(tp)
       fs.unlinkSync(trayPidFile)
     }
+    if (fs.existsSync(trayPsFile)) fs.unlinkSync(trayPsFile)
+    if (fs.existsSync(trayErrFile)) fs.unlinkSync(trayErrFile)
   } catch {}
 }
 
