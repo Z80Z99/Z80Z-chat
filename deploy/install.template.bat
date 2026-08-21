@@ -1179,7 +1179,7 @@ function Backup-Data($projDir, $cfg) {
 # ---------- rebuild project (keep data / logs / node_modules / config.json) ----------
 function Rebuild-Project($projDir) {
   Progress '重建项目文件（保留 data / logs / node_modules / config.json）...'
-  $keepNames = @('data', 'logs', 'node_modules', 'config.json')
+  $keepNames = @('data', 'logs', 'node_modules', 'config.json', 'assets')
   Get-ChildItem $projDir -Force | Where-Object { $keepNames -notcontains $_.Name } | ForEach-Object {
     Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
   }
