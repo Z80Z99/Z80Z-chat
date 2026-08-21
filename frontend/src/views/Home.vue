@@ -56,7 +56,7 @@ const shareFpsOptions = [15, 30, 60]
 
 async function startShareFromMenu() {
   shareMenuOpen.value = false
-  await voiceStore.startScreenShare({ width: screenShareOpts.width, fps: screenShareOpts.fps })
+  await voiceStore.startScreenShare({ width: screenShareOpts.value.width, fps: screenShareOpts.value.fps })
 }
 
 watch(() => serverStore.currentServer?.id, () => {
@@ -668,12 +668,9 @@ function roomNameById(roomId: string | null) {
                     <p class="text-discord-100 text-xs font-medium mb-2">画面质量</p>
                     <div class="flex flex-wrap gap-1.5">
                       <button v-for="p in sharePresetOptions" :key="p.value"
-                              :disabled="p.value > 0 && voiceStore.sourceResolution.width > 0 && p.value > voiceStore.sourceResolution.width"
                               @click="screenShareOpts.width = p.value"
                               class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all"
-                              :class="(p.value > 0 && voiceStore.sourceResolution.width > 0 && p.value > voiceStore.sourceResolution.width)
-                                ? 'bg-discord-900 border-discord-700 text-discord-500 opacity-50 cursor-not-allowed'
-                                : screenShareOpts.width === p.value
+                              :class="screenShareOpts.width === p.value
                                   ? 'bg-green/15 border-green/50 text-green shadow-sm shadow-green/10 cursor-pointer'
                                   : 'bg-discord-900 border-discord-600 text-discord-100 hover:border-discord-400 hover:text-white cursor-pointer'">
                         {{ p.label }}

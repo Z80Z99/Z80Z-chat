@@ -101,13 +101,13 @@ export const useVoiceStore = defineStore('voice', () => {
   // 投屏码率上限表（bps），按宽度 preset 索引；'0' 为源画质上限
   // 高复杂度画面（全屏游戏/动态场景）需要更高码率，否则编码器被迫掉帧
   const bitrateCeilings: Record<string, number> = {
-    '0': 6_000_000,
-    '1280': 3_500_000,
-    '1920': 6_000_000,
-    '2560': 8_000_000,
-    '3840': 12_000_000
+    '0': 10_000_000,
+    '1280': 6_000_000,
+    '1920': 10_000_000,
+    '2560': 16_000_000,
+    '3840': 24_000_000
   }
-  const BITRATE_FLOOR = 1_000_000
+  const BITRATE_FLOOR = 2_000_000
   // 自适应码率运行时状态
   let bitrateLimit = 0          // 当前生效的码率上限（动态升降）
   let goodQualityStreak = 0     // 连续好质量计数（升档需累积）
@@ -129,16 +129,23 @@ export const useVoiceStore = defineStore('voice', () => {
     return 0
   }
 
-  async function applySenderBitrate(maxBitrate: number, maxFramerate?: number) {
+  async function applySenderQuality(maxBitrate: number, maxFramerate: number, scaleResolutionDownBy: number) {
     for (const sender of screenSenders.value.values()) {
       try {
         const params = sender.getParameters()
         if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
         params.encodings[0].maxBitrate = maxBitrate
-        if (maxFramerate && maxFramerate > 0) params.encodings[0].maxFramerate = maxFramerate
+        params.encodings[0].maxFramerate = maxFramerate
+        params.encodings[0].scaleResolutionDownBy = scaleResolutionDownBy
+        params.degradationPreference = 'maintain-framerate'
         await sender.setParameters(params)
       } catch {}
     }
+  }
+
+  function shareScaleFor(width: number) {
+    if (width <= 0 || sourceResolution.value.width <= 0) return 1
+    return Math.max(sourceResolution.value.width / width, 1)
   }
 
   async function ensureMic() {
@@ -181,6 +188,9 @@ export const useVoiceStore = defineStore('voice', () => {
     if (outputCtx && outputCtx.state === 'suspended') {
       outputCtx.resume().catch(() => {})
     }
+    document.querySelectorAll<HTMLAudioElement>('audio[id^="audio-"]').forEach(el => {
+      if (el.paused) el.play().catch(() => {})
+    })
   }
 
   if (typeof window !== 'undefined') {
@@ -207,14 +217,22 @@ export const useVoiceStore = defineStore('voice', () => {
       sentAudioTrack = micDest.stream.getAudioTracks()[0] || null
       if (sentAudioTrack) {
         peerConnections.value.forEach((pc) => {
-          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio')
+          const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
           sender?.replaceTrack(sentAudioTrack)
         })
       }
     } catch (e) {
       console.error('音频处理管线初始化失败', e)
-      micAvailable.value = false
-      micError.value = '音频处理不可用，仅能听'
+      // Web Audio 不可用时直接发送原始麦克风轨，不能把可用麦克风降级成仅能听。
+      sentAudioTrack = localStream.value?.getAudioTracks()[0] || null
+      micAvailable.value = !!sentAudioTrack
+      micError.value = sentAudioTrack ? '音频增强不可用，已切换为直接发送麦克风' : '音频处理不可用，仅能听'
+      if (sentAudioTrack) {
+        peerConnections.value.forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
+          sender?.replaceTrack(sentAudioTrack).catch(() => {})
+        })
+      }
     }
   }
 
@@ -298,7 +316,9 @@ export const useVoiceStore = defineStore('voice', () => {
       inputDeviceId.value = deviceId
       micAvailable.value = true
       micError.value = ''
+      applyMicEnabled()
       initAudioPipeline()
+      await restoreAudioSenders()
     } catch (e: any) {
       micAvailable.value = false
       micError.value = '无法切换输入设备，已保持原设备'
@@ -502,10 +522,37 @@ export const useVoiceStore = defineStore('voice', () => {
       })
       micAvailable.value = true
       micError.value = ''
+      applyMicEnabled()
       initAudioPipeline()
+      await restoreAudioSenders()
     } catch (e: any) {
       micAvailable.value = false
       micError.value = '麦克风仍不可用'
+    }
+  }
+
+  async function restoreAudioSenders() {
+    if (!sentAudioTrack) return
+    for (const [userId, pc] of peerConnections.value) {
+      try {
+        let sender = pc.getSenders().find(s => s.track?.kind === 'audio')
+        if (sender) {
+          await sender.replaceTrack(sentAudioTrack)
+        } else {
+          const transceiver = pc.getTransceivers().find(t => t.receiver.track?.kind === 'audio')
+          if (transceiver) {
+            await transceiver.sender.replaceTrack(sentAudioTrack)
+            transceiver.direction = 'sendrecv'
+          } else {
+            sender = pc.addTrack(sentAudioTrack, micDest?.stream || new MediaStream([sentAudioTrack]))
+          }
+        }
+        if (pc.signalingState === 'stable' && currentRoom.value) {
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          ws.send({ type: 'voice-offer', roomId: currentRoom.value, targetUserId: userId, data: pc.localDescription })
+        }
+      } catch {}
     }
   }
 
@@ -546,24 +593,24 @@ export const useVoiceStore = defineStore('voice', () => {
 
   function applyPreferredVideoCodec(pc: RTCPeerConnection) {
     try {
-      const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+      const transceiver = pc.getTransceivers().find(t => t.sender.track?.kind === 'video')
       const caps = (RTCRtpSender as any).getCapabilities?.('video')
-      if (!sender || !caps?.codecs?.length) return
+      if (!transceiver || !caps?.codecs?.length || typeof transceiver.setCodecPreferences !== 'function') return
       const isVp9 = (m: string) => /VP9/i.test(m)
       const order = ['H264', 'VP8']
       const preferred: RTCRtpCodecCapability[] = []
       for (const name of order) {
         for (const c of caps.codecs) {
           if (!c.mimeType.toLowerCase().includes(name.toLowerCase())) continue
-          if (!preferred.some(o => o.mimeType === c.mimeType)) preferred.push({ mimeType: c.mimeType })
+          if (!preferred.some(o => o.mimeType === c.mimeType && o.sdpFmtpLine === c.sdpFmtpLine)) preferred.push(c)
         }
       }
       for (const c of caps.codecs) {
         if (isVp9(c.mimeType)) continue
-        if (!preferred.some(o => o.mimeType === c.mimeType)) preferred.push({ mimeType: c.mimeType })
+        if (!preferred.some(o => o.mimeType === c.mimeType && o.sdpFmtpLine === c.sdpFmtpLine)) preferred.push(c)
       }
       if (preferred.length) {
-        sender.setCodecPreferences(preferred)
+        transceiver.setCodecPreferences(preferred)
       }
     } catch {}
   }
@@ -573,41 +620,18 @@ export const useVoiceStore = defineStore('voice', () => {
     currentShareOpts.value = { width: opts.width ?? 1920, fps: opts.fps ?? 30 }
     const preset = sharePresets[String(currentShareOpts.value.width)] || sharePresets['1920']
     const fps = currentShareOpts.value.fps
+    // 先按源分辨率捕获，再由 RTCRtpSender 缩放输出。若直接在
+    // getDisplayMedia 中请求档位尺寸，会把降采样结果误判成源分辨率。
     const videoOpts: any = { frameRate: { ideal: fps } }
-    if (preset.w > 0 && preset.h > 0) {
-      videoOpts.width = { ideal: preset.w }
-      videoOpts.height = { ideal: preset.h }
-    }
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: videoOpts, audio: false })
       screenStream.value = stream
       isScreenSharing.value = true
 
       const track = stream.getVideoTracks()[0]
-      // 告知编码器这是屏幕内容（优先清晰度/文字），而非摄像头
-      try { track.contentHint = 'detail' } catch {}
-
-      // 强制应用所选画质/帧率：getDisplayMedia 的 ideal 约束不保证生效，
-      // 用 exact 约束强制，源不支持时回退 ideal（与 changeShareQuality 一致）
-      if (preset.w > 0 && preset.h > 0) {
-        try {
-          await track.applyConstraints({
-            width: { exact: preset.w },
-            height: { exact: preset.h },
-            frameRate: fps > 0 ? { exact: fps } : undefined
-          })
-        } catch {
-          try {
-            await track.applyConstraints({
-              width: { ideal: preset.w },
-              height: { ideal: preset.h },
-              frameRate: fps > 0 ? { ideal: fps } : undefined
-            })
-          } catch {}
-        }
-      } else if (fps > 0) {
-        try { await track.applyConstraints({ frameRate: { ideal: fps } }) } catch {}
-      }
+      // 投屏包含游戏等高运动内容，优先维持帧率；静态内容仍由较高码率保证清晰度。
+      try { track.contentHint = 'motion' } catch {}
+      try { await track.applyConstraints({ frameRate: { ideal: fps, max: fps } }) } catch {}
 
       const settings = track.getSettings()
       sourceResolution.value = { width: settings.width || preset.w || 1920, height: settings.height || preset.h || 1080 }
@@ -635,6 +659,8 @@ export const useVoiceStore = defineStore('voice', () => {
             if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
             params.encodings[0].maxBitrate = bitrateLimit
             params.encodings[0].maxFramerate = fps
+            params.encodings[0].scaleResolutionDownBy = shareScaleFor(currentShareOpts.value.width)
+            params.degradationPreference = 'maintain-framerate'
             await sender.setParameters(params)
           } catch {}
           const offer = await pc.createOffer({ iceRestart: true })
@@ -657,38 +683,15 @@ export const useVoiceStore = defineStore('voice', () => {
     currentShareOpts.value = { width: snappedW, fps: opts.fps }
     const effOpts = { width: snappedW, fps: opts.fps }
 
-    const src = sourceResolution.value
-    const targetW = effOpts.width > 0 ? Math.min(effOpts.width, src.width) : src.width
-    const targetH = src.height > 0 ? Math.round(targetW * (src.height / src.width)) : 0
-
     // 切换画质时重置码率上限到新 preset 的上限
     bitrateLimit = bitrateCeilingFor(effOpts.width)
     goodQualityStreak = 0
 
-    try {
-      const track = screenStream.value.getVideoTracks()[0]
-      if (track) {
-        await track.applyConstraints({
-          width: targetW > 0 ? { exact: targetW } : undefined,
-          height: targetH > 0 ? { exact: targetH } : undefined,
-          frameRate: effOpts.fps > 0 ? { exact: effOpts.fps } : undefined
-        })
-      }
-      // applyConstraints 成功后仍需把码率上限写回 sender（分辨率变化不更新 sender 参数）
-      await applySenderBitrate(bitrateLimit, effOpts.fps)
-    } catch {
-      const scale = Math.max(src.width / targetW, 1)
-      for (const sender of screenSenders.value.values()) {
-        try {
-          const params = sender.getParameters()
-          if (!params.encodings) params.encodings = [{}]
-          params.encodings[0].scaleResolutionDownBy = scale
-          params.encodings[0].maxFramerate = effOpts.fps
-          params.encodings[0].maxBitrate = bitrateLimit
-          await sender.setParameters(params)
-        } catch {}
-      }
+    const track = screenStream.value.getVideoTracks()[0]
+    if (track) {
+      try { await track.applyConstraints({ frameRate: { ideal: effOpts.fps } }) } catch {}
     }
+    await applySenderQuality(bitrateLimit, effOpts.fps, shareScaleFor(effOpts.width))
   }
 
   function stopScreenShare() {
@@ -705,6 +708,7 @@ export const useVoiceStore = defineStore('voice', () => {
     screenStream.value = null
     isScreenSharing.value = false
     screenSenders.value.clear()
+    sourceResolution.value = { width: 0, height: 0 }
   }
 
   // 实时切换投屏源窗口：保留 peer connection / 语音 / 码率参数，仅用 replaceTrack 原子替换视频轨
@@ -722,7 +726,8 @@ export const useVoiceStore = defineStore('voice', () => {
         newStream.getTracks().forEach(t => t.stop())
         return
       }
-      try { newTrack.contentHint = 'detail' } catch {}
+      try { newTrack.contentHint = 'motion' } catch {}
+      try { await newTrack.applyConstraints({ frameRate: { ideal: fps, max: fps } }) } catch {}
 
       // 对每路 sender 原子替换视频轨（无需重新协商）
       for (const sender of screenSenders.value.values()) {
@@ -880,7 +885,7 @@ export const useVoiceStore = defineStore('voice', () => {
         goodQualityStreak = 0
         if (next < bitrateLimit) {
           bitrateLimit = next
-          applySenderBitrate(bitrateLimit)
+          applySenderQuality(bitrateLimit, currentShareOpts.value.fps, shareScaleFor(currentShareOpts.value.width))
         }
       } else if (good) {
         // 升档需连续 3 次好质量，避免抖动
@@ -889,7 +894,7 @@ export const useVoiceStore = defineStore('voice', () => {
           const next = Math.min(Math.round(bitrateLimit * 1.3), ceiling)
           if (next > bitrateLimit) {
             bitrateLimit = next
-            applySenderBitrate(bitrateLimit)
+            applySenderQuality(bitrateLimit, currentShareOpts.value.fps, shareScaleFor(currentShareOpts.value.width))
           }
           goodQualityStreak = 0
         }
@@ -1017,6 +1022,14 @@ export const useVoiceStore = defineStore('voice', () => {
       screenStream.value.getVideoTracks().forEach(track => {
         const sender = pc!.addTrack(track, screenStream.value!)
         screenSenders.value.set(userId, sender)
+        const params = sender.getParameters()
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+        params.encodings[0].maxBitrate = bitrateLimit || bitrateCeilingFor(currentShareOpts.value.width)
+        params.encodings[0].maxFramerate = currentShareOpts.value.fps
+        params.encodings[0].scaleResolutionDownBy = shareScaleFor(currentShareOpts.value.width)
+        params.degradationPreference = 'maintain-framerate'
+        sender.setParameters(params).catch(() => {})
+        applyPreferredVideoCodec(pc!)
       })
     }
 
@@ -1029,8 +1042,9 @@ export const useVoiceStore = defineStore('voice', () => {
     pc.ontrack = (event) => {
       const track = event.track
       if (track.kind === 'audio') {
+        const stream = event.streams[0] || new MediaStream([track])
         const audioEl = document.createElement('audio')
-        audioEl.srcObject = event.streams[0]
+        audioEl.srcObject = stream
         audioEl.autoplay = true
         // deafen 状态下新建音频元素必须保持静音（修复新用户/重连绕过 deafen）
         if (isDeafened.value) {
@@ -1050,15 +1064,16 @@ export const useVoiceStore = defineStore('voice', () => {
         // 持续重试直到播放成功（用户与页面交互后即可解锁）
         const playAudio = () => {
           audioEl.play().catch(() => {
-            setTimeout(playAudio, 800)
+            setTimeout(playAudio, 1000)
           })
         }
         playAudio()
+        track.addEventListener('unmute', playAudio)
         try {
           ensureOutputCtx()
           const existingAnalyser = outputAnalysers.get(userId)
           if (existingAnalyser) existingAnalyser.src.disconnect()
-          const src = outputCtx!.createMediaStreamSource(event.streams[0])
+          const src = outputCtx!.createMediaStreamSource(stream)
           const analyser = outputCtx!.createAnalyser()
           analyser.fftSize = 512
           src.connect(analyser)
@@ -1078,16 +1093,12 @@ export const useVoiceStore = defineStore('voice', () => {
 
     pc.onconnectionstatechange = () => {
       const st = pc!.connectionState
-      if (st === 'disconnected' || st === 'failed') {
-        remoteScreens.value = remoteScreens.value.filter(e => e.userId !== userId)
-      }
+       if (st === 'disconnected' || st === 'failed') {
+         remoteScreens.value = remoteScreens.value.filter(e => e.userId !== userId)
+         scheduleReconnect(userId, pc!)
+       }
       if (st === 'connected') {
         reconnectAttempts.delete(userId)
-      }
-      if (st === 'failed') {
-        // 连接失败自动重连：ICE 打洞/TURN 抖动导致连接死亡时，
-        // 延迟重新协商（iceRestart）让语音/投屏恢复，最多重试 3 次
-        scheduleReconnect(userId, pc!)
       }
     }
 
@@ -1114,6 +1125,9 @@ export const useVoiceStore = defineStore('voice', () => {
       return
     }
     const pc = getOrCreatePeerConnection(userId)
+    // 成员初次建连时固定由 userId 较小的一方发起，避免双方同时 offer。
+    // 已有连接的 ICE 重启和投屏重协商走各自专用路径，不受此限制。
+    if ((authStore.user?.id || '') > userId && !pc.remoteDescription) return
     // 协商在途或已建立连接则跳过，避免重复/冲突 offer
     if (pc.signalingState !== 'stable') return
     if (pc.connectionState === 'connected' && pc.remoteDescription) return
