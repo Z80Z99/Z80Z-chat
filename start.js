@@ -310,21 +310,116 @@ function buildTrayScript() {
   [string]$PidFile = '${q(pidFile)}',
   [string]$SiteName = '${q(site)}'
 )
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+$ErrorActionPreference = 'Continue'
 
-# 最小化到任务栏的窗口：给一个有意义的标题
+# 原生 Shell_NotifyIcon 托盘（C# NativeWindow + 固定 GUID + NOTIFYICON_VERSION_4）
+# 参考 DeepSeek-Harness 的实现：比 WinForms NotifyIcon 更不易被安全软件行为拦截
+$TrayCs = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+public class Z80Tray : NativeWindow {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct NOTIFYICONDATA {
+    public int cbSize;
+    public IntPtr hWnd;
+    public int uID;
+    public uint uFlags;
+    public uint uCallbackMessage;
+    public IntPtr hIcon;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+    public uint dwState;
+    public uint dwStateMask;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo;
+    public uint uTimeoutOrVersion;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
+    public uint dwInfoFlags;
+    public Guid guidItem;
+    public IntPtr hBalloonIcon;
+  }
+  const uint NIM_ADD = 0;
+  const uint NIM_DELETE = 2;
+  const uint NIM_SETVERSION = 4;
+  const uint NIF_MESSAGE = 1;
+  const uint NIF_ICON = 2;
+  const uint NIF_TIP = 4;
+  const uint NIF_GUID = 0x20;
+  const uint NOTIFYICON_VERSION_4 = 4;
+  const int WM_USER = 0x400;
+  const int WM_LBUTTONDBLCLK = 0x0203;
+  const int WM_RBUTTONUP = 0x0205;
+  public static readonly Guid TrayGuid = new Guid("7C2F4A1B-9E3D-4C5A-B6F8-2D1E0A9B3C44");
+  const int UID = 0x0D5;
+
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpData);
+  [DllImport("user32.dll")]
+  static extern bool SetForegroundWindow(IntPtr hWnd);
+
+  public event Action DoubleClicked;
+  ContextMenuStrip _menu;
+  IntPtr _hicon;
+
+  public Z80Tray(IntPtr iconHandle, string tip, ContextMenuStrip menu) {
+    _hicon = iconHandle;
+    _menu = menu;
+    CreateHandle(new CreateParams());
+    NOTIFYICONDATA n = new NOTIFYICONDATA();
+    n.cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATA));
+    n.hWnd = Handle;
+    n.uID = UID;
+    n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID;
+    n.uCallbackMessage = WM_USER + 1;
+    n.hIcon = iconHandle;
+    n.szTip = tip;
+    n.guidItem = TrayGuid;
+    Shell_NotifyIcon(NIM_ADD, ref n);
+    n.uTimeoutOrVersion = NOTIFYICON_VERSION_4;
+    Shell_NotifyIcon(NIM_SETVERSION, ref n);
+  }
+
+  protected override void WndProc(ref Message m) {
+    if (m.Msg == WM_USER + 1) {
+      int msg = (int)m.LParam & 0xFFFF;
+      if (msg == WM_LBUTTONDBLCLK) {
+        if (DoubleClicked != null) DoubleClicked();
+      } else if (msg == WM_RBUTTONUP) {
+        if (_menu != null) {
+          SetForegroundWindow(Handle);
+          _menu.Show(Cursor.Position);
+        }
+      }
+    }
+    base.WndProc(ref m);
+  }
+
+  public void DisposeTray() {
+    NOTIFYICONDATA n = new NOTIFYICONDATA();
+    n.cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATA));
+    n.hWnd = Handle;
+    n.uID = UID;
+    n.uFlags = NIF_GUID;
+    n.guidItem = TrayGuid;
+    Shell_NotifyIcon(NIM_DELETE, ref n);
+    DestroyHandle();
+  }
+}
+'@
+
+# 窗口标题 + 运行时隐藏（启动参数用 Minimized 规避安全软件对隐藏进程的拦截）
 try { $host.UI.RawUI.WindowTitle = $SiteName + ' 服务托盘' } catch {}
-# 启动后立即隐藏控制台窗口：卡巴斯基会拦截"启动参数 -WindowStyle Hidden"
-# 的常驻进程，但运行时隐藏窗口不触发；托盘常驻不受影响
-try {
-  $sig = '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
-  Add-Type -MemberDefinition $sig -Name Win32 -Namespace Native -ErrorAction SilentlyContinue
-  $proc = Get-Process -Id $PID
-  $proc.Refresh()
-  $hwnd = $proc.MainWindowHandle
-  if ($hwnd -ne 0) { [Native.Win32]::ShowWindow($hwnd, 0) }
-} catch {}
+function Hide-ConsoleWindow {
+  try {
+    $sig = '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
+    Add-Type -MemberDefinition $sig -Name Win32 -Namespace Native -ErrorAction SilentlyContinue
+    $proc = Get-Process -Id $PID
+    $proc.Refresh()
+    $hwnd = $proc.MainWindowHandle
+    if ($hwnd -ne 0) { [Native.Win32]::ShowWindow($hwnd, 0) }
+  } catch {}
+}
+Hide-ConsoleWindow
 
 function Test-Service {
   if (-not (Test-Path -LiteralPath $PidFile)) { return $false }
@@ -334,64 +429,64 @@ function Test-Service {
     return [bool](Get-Process -Id $p -ErrorAction SilentlyContinue)
   } catch { return $false }
 }
-
 function Stop-ServiceNow {
   try {
     $p = [int](([System.IO.File]::ReadAllText($PidFile)).Trim())
     if ($p -gt 0) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
   } catch {}
 }
-
 function Open-Panel {
   try {
     Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('cd /d "' + $Project + '" && "' + $Node + '" start.js') -WindowStyle Normal
   } catch {}
 }
 
-$tray = New-Object System.Windows.Forms.NotifyIcon
-$bmp = New-Object System.Drawing.Bitmap 16,16
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.Clear([System.Drawing.Color]::FromArgb(255, 88, 101, 242))
-$g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)), 4, 3, 8, 10)
-$g.Dispose()
-$icon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
-$tray.Icon = $icon
-$tray.Text = $SiteName + ' 服务运行中'
-$tray.Visible = $true
+$script:quit = $false
+$tray = $null
+try {
+  Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+  Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+  Add-Type -TypeDefinition $TrayCs -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing') -ErrorAction Stop
 
-$menu = New-Object System.Windows.Forms.ContextMenuStrip
-$openItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$openItem.Text = '打开管理面板'
-$openItem.Add_Click({ Open-Panel })
-$stopItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$stopItem.Text = '停止服务并退出'
-$stopItem.Add_Click({ Stop-ServiceNow; $tray.Visible = $false; $tray.Dispose(); [System.Windows.Forms.Application]::Exit() })
-$exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$exitItem.Text = '退出托盘（服务继续运行）'
-$exitItem.Add_Click({ $tray.Visible = $false; $tray.Dispose(); [System.Windows.Forms.Application]::Exit() })
-$menu.Items.Add($openItem)
-$menu.Items.Add($stopItem)
-$menu.Items.Add($exitItem)
-$tray.ContextMenuStrip = $menu
+  $bmp = New-Object System.Drawing.Bitmap 16,16
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.Clear([System.Drawing.Color]::FromArgb(255, 88, 101, 242))
+  $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)), 4, 3, 8, 10)
+  $g.Dispose()
+  $hicon = $bmp.GetHicon()
 
-$tray.Add_MouseClick({
-  param($sender, $e)
-  if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { $tray.ShowContextMenu() }
-})
+  $menu = New-Object System.Windows.Forms.ContextMenuStrip
+  $mOpen = New-Object System.Windows.Forms.ToolStripMenuItem('打开管理面板')
+  $mOpen.add_Click({ Open-Panel })
+  $mStop = New-Object System.Windows.Forms.ToolStripMenuItem('停止服务并退出')
+  $mStop.add_Click({ Stop-ServiceNow; $script:quit = $true; try { [System.Windows.Forms.Application]::Exit() } catch {} })
+  $mExit = New-Object System.Windows.Forms.ToolStripMenuItem('退出托盘（服务继续运行）')
+  $mExit.add_Click({ $script:quit = $true; try { [System.Windows.Forms.Application]::Exit() } catch {} })
+  [void]$menu.Items.Add($mOpen)
+  [void]$menu.Items.Add($mStop)
+  [void]$menu.Items.Add($mExit)
 
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 5000
-$timer.Add_Tick({
-  if (-not (Test-Service)) {
-    $timer.Stop()
-    $tray.Visible = $false
-    $tray.Dispose()
-    [System.Windows.Forms.Application]::Exit()
-  }
-})
-$timer.Start()
+  $tray = New-Object Z80Tray -ArgumentList @($hicon, $SiteName + ' 服务运行中', $menu)
+  $tray.add_DoubleClicked({ Open-Panel })
 
-[System.Windows.Forms.Application]::Run()
+  $timer = New-Object System.Windows.Forms.Timer
+  $timer.Interval = 5000
+  $timer.add_Tick({
+    if (-not (Test-Service)) {
+      $timer.Stop()
+      $script:quit = $true
+      try { [System.Windows.Forms.Application]::Exit() } catch {}
+    }
+  })
+  $timer.Start()
+
+  [System.Windows.Forms.Application]::Run()
+  $timer.Stop()
+  $timer.Dispose()
+} catch {
+  # 托盘创建失败：窗口保持（用户可见），不隐藏
+}
+try { if ($tray) { $tray.DisposeTray() } } catch {}
 `
 }
 
