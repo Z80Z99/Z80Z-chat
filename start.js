@@ -1335,6 +1335,22 @@ async function deploy() {
   for (const ip of localIPv4()) {
     console.log(`    ${dim('局域网')}  ${cyan(`http://${ip}:${config.port}`)}`)
   }
+
+  // 自动启动已启用的隧道
+  const tunnelStarted = []
+  if (cfAutoStart() && !cfTunnelRunning()) {
+    const r = await cfStart()
+    if (r.ok) tunnelStarted.push('Cloudflare')
+  }
+  if (sfpAutoStart() && !sfpRunning()) {
+    const r = await sfpStart()
+    if (r.ok) tunnelStarted.push('SakuraFRP')
+  }
+  if (tunnelStarted.length) {
+    console.log('')
+    log(dim('已自动启动隧道：' + tunnelStarted.join('、')))
+  }
+
   console.log('')
   return child
 }
@@ -1663,6 +1679,10 @@ function cfSaveSettings(s) {
 }
 
 function cfHostname() { return cfSettings().hostname || CF_DEFAULT_HOSTNAME }
+
+function cfAutoStart() { return !!cfSettings().autoStart }
+
+function cfSetAutoStart(v) { cfSaveSettings({ ...cfSettings(), autoStart: !!v }) }
 
 // 隧道是否已创建：settings 缓存 → tunnel list → tunnel info
 function cfTunnelId() {
@@ -2006,6 +2026,7 @@ async function cfMenu() {
     console.log(item('3', '停止隧道', '停止后台 cloudflared 进程', !!running))
     console.log(item('4', '安装 / 修复 cloudflared', '自动下载（约 54MB，线路测速选择）'))
     console.log(item('5', '测试公网访问', `检查 https://${cfHostname()} 是否可达`, !!running))
+    console.log(item('6', cfAutoStart() ? '关闭服务随启' : '开启服务随启', cfAutoStart() ? '服务启动时不再自动启动隧道' : '服务启动时自动启动隧道', !!tunnelId))
     console.log(item('0', '返回主菜单', ''))
     console.log('')
     const choice = await ask('  ' + accent('>') + ' ')
@@ -2026,6 +2047,10 @@ async function cfMenu() {
     } else if (choice === '5') {
       console.log('')
       await cfTest()
+    } else if (choice === '6') {
+      cfSetAutoStart(!cfAutoStart())
+      log(ok(cfAutoStart() ? '已开启：服务启动时自动启动 Cloudflare 隧道' : '已关闭：服务启动时不再自动启动 Cloudflare 隧道'))
+      await waitKey()
     } else if (choice === '0') {
       return
     }
@@ -2080,6 +2105,10 @@ function sfpSaveSettings(s) {
   fs.mkdirSync(SFP_DIR, { recursive: true })
   fs.writeFileSync(SFP_SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8')
 }
+
+function sfpAutoStart() { return !!sfpSettings().autoStart }
+
+function sfpSetAutoStart(v) { sfpSaveSettings({ ...sfpSettings(), autoStart: !!v }) }
 
 // frpc 是否在运行（PID 文件 + tasklist 校验）
 function sfpRunning() {
@@ -2375,6 +2404,7 @@ async function sfpMenu() {
     console.log(item('4', '安装 / 修复 frpc', '粘贴面板下载链接（约 10~20MB）'))
     console.log(item('5', '测试公网访问', `检查 ${url || '访问地址'} 是否可达`, !!running && !!url))
     console.log(item('6', '重新配置连接', '交互模式 / 命令行模式重选', !!exe))
+    console.log(item('7', sfpAutoStart() ? '关闭服务随启' : '开启服务随启', sfpAutoStart() ? '服务启动时不再自动启动隧道' : '服务启动时自动启动隧道', !!s.token))
     console.log(item('0', '返回隧道管理', ''))
     console.log('')
     const choice = await ask('  ' + accent('>') + ' ')
@@ -2420,6 +2450,10 @@ async function sfpMenu() {
           log(ok('已切换为命令行模式（隧道 ID ' + tid.trim() + '）'))
         }
       }
+      await waitKey()
+    } else if (choice === '7') {
+      sfpSetAutoStart(!sfpAutoStart())
+      log(ok(sfpAutoStart() ? '已开启：服务启动时自动启动 SakuraFRP 隧道' : '已关闭：服务启动时不再自动启动 SakuraFRP 隧道'))
       await waitKey()
     } else if (choice === '0') {
       return
