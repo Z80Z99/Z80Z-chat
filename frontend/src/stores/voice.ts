@@ -960,13 +960,44 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
 
+  // 连接失败自动重连计数（按对端 userId）
+  const reconnectAttempts = new Map<string, number>()
+
+  // failed 后延迟重新协商（iceRestart），让因打洞/TURN 抖动死掉的连接自动恢复
+  function scheduleReconnect(userId: string, pc: RTCPeerConnection) {
+    const attempt = (reconnectAttempts.get(userId) || 0) + 1
+    if (attempt > 3) {
+      reconnectAttempts.delete(userId)
+      return
+    }
+    reconnectAttempts.set(userId, attempt)
+    setTimeout(() => {
+      const cur = peerConnections.value.get(userId)
+      if (!cur || cur !== pc) return
+      if (cur.connectionState === 'connected') {
+        reconnectAttempts.delete(userId)
+        return
+      }
+      if (!currentRoom.value) return
+      try {
+        cur.createOffer({ iceRestart: true })
+          .then((offer) => cur.setLocalDescription(offer))
+          .then(() => {
+            if (currentRoom.value) {
+              ws.send({ type: 'voice-offer', roomId: currentRoom.value, targetUserId: userId, data: pc.localDescription })
+            }
+          })
+          .catch(() => {})
+      } catch {}
+    }, 2000 * attempt)
+  }
+
   function getOrCreatePeerConnection(userId: string): RTCPeerConnection {
     let pc = peerConnections.value.get(userId)
     if (pc) return pc
 
     const config = { iceServers: iceServersCache || fallbackIceServers }
     pc = new RTCPeerConnection(config)
-
     if (localStream.value) {
       if (sentAudioTrack && micDest) {
         pc!.addTrack(sentAudioTrack, micDest.stream)
@@ -1046,8 +1077,17 @@ export const useVoiceStore = defineStore('voice', () => {
     }
 
     pc.onconnectionstatechange = () => {
-      if (pc!.connectionState === 'disconnected' || pc!.connectionState === 'failed') {
+      const st = pc!.connectionState
+      if (st === 'disconnected' || st === 'failed') {
         remoteScreens.value = remoteScreens.value.filter(e => e.userId !== userId)
+      }
+      if (st === 'connected') {
+        reconnectAttempts.delete(userId)
+      }
+      if (st === 'failed') {
+        // 连接失败自动重连：ICE 打洞/TURN 抖动导致连接死亡时，
+        // 延迟重新协商（iceRestart）让语音/投屏恢复，最多重试 3 次
+        scheduleReconnect(userId, pc!)
       }
     }
 
