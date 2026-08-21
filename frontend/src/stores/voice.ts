@@ -99,14 +99,15 @@ export const useVoiceStore = defineStore('voice', () => {
   const sourceResolution = ref({ width: 0, height: 0 })
 
   // 投屏码率上限表（bps），按宽度 preset 索引；'0' 为源画质上限
+  // 高复杂度画面（全屏游戏/动态场景）需要更高码率，否则编码器被迫掉帧
   const bitrateCeilings: Record<string, number> = {
-    '0': 4_000_000,
-    '1280': 2_000_000,
-    '1920': 3_500_000,
-    '2560': 5_000_000,
-    '3840': 8_000_000
+    '0': 6_000_000,
+    '1280': 3_500_000,
+    '1920': 6_000_000,
+    '2560': 8_000_000,
+    '3840': 12_000_000
   }
-  const BITRATE_FLOOR = 600_000
+  const BITRATE_FLOOR = 1_000_000
   // 自适应码率运行时状态
   let bitrateLimit = 0          // 当前生效的码率上限（动态升降）
   let goodQualityStreak = 0     // 连续好质量计数（升档需累积）
@@ -1014,6 +1015,14 @@ export const useVoiceStore = defineStore('voice', () => {
         const existing = document.getElementById(`audio-${userId}`)
         if (existing) existing.remove()
         document.body.appendChild(audioEl)
+        // 自动播放重试：远程音频可能因浏览器自动播放策略或轨道未就绪而 play 失败，
+        // 持续重试直到播放成功（用户与页面交互后即可解锁）
+        const playAudio = () => {
+          audioEl.play().catch(() => {
+            setTimeout(playAudio, 800)
+          })
+        }
+        playAudio()
         try {
           ensureOutputCtx()
           const existingAnalyser = outputAnalysers.get(userId)
@@ -1174,6 +1183,8 @@ export const useVoiceStore = defineStore('voice', () => {
     if (!localStream.value) {
       await ensureMic()
     }
+    // 新麦克风轨道默认 enabled=true，重连后须恢复静音/耳聋状态
+    applyMicEnabled()
     initAudioPipeline()
     await refreshDevices()
     currentRoom.value = roomId

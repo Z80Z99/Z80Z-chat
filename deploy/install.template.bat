@@ -1523,15 +1523,19 @@ function Update($cfg, $projDir, $oldVer) {
     if ($sys['ok']) { $script:useSystemNode = $true }
   }
   # 已是最新版本时不再询问 Y/N，但仍保留精简界面（切版本/进管理/恢复提示入口）
-  $isLatest = ($oldVer -eq $AppVersion)
+  # 注意：版本号相同但内容指纹不同（启动器热修复、未 bump 版本）不算"已是最新"
   $skip = $script:globalPrefs['skipUpdatePrompt']
   # 当前版本发布时间 = 项目安装标记的 installedAt；最新版本发布时间 = 本 bat 构建时间
   $oldInstalledAt = ''
+  $mkHash = ''
   $mkFile = Join-Path $projDir '.install-version'
   try {
     $mk = ConvertFrom-JsonCompat ([System.IO.File]::ReadAllText($mkFile, [System.Text.Encoding]::UTF8))
     $oldInstalledAt = [string](Get-JsonValue $mk 'installedAt')
+    $mkHash = [string](Get-JsonValue $mk 'payloadHash')
   } catch {}
+  $contentDiff = ($mkHash -ne '' -and $mkHash -ne $PayloadSha)
+  $isLatest = ($oldVer -eq $AppVersion -and -not $contentDiff)
   H1 'Z80Z-chat 更新'
   Ln ''
   if ($isLatest) { Info '当前已是最新版本' } else { Info '检测到新版本！' }
@@ -1901,11 +1905,16 @@ try {
     $cfg = Apply-OsFallback (Read-Config $projDir)
     $markerFile = Join-Path $projDir '.install-version'
     $oldVer = ''
+    $oldHash = ''
     try {
       $mk = ConvertFrom-JsonCompat ([System.IO.File]::ReadAllText($markerFile, [System.Text.Encoding]::UTF8))
       $oldVer = Get-JsonValue $mk 'version'
+      $oldHash = [string](Get-JsonValue $mk 'payloadHash')
     } catch {}
-    if ($oldVer -eq $AppVersion -and -not $script:globalPrefs['skipUpdatePrompt'] -and $found.Count -eq 1) {
+    # 版本相同且内容指纹一致才直接进入管理；同版本但内容指纹不同
+    # （bat 内容热修复、未 bump 版本）同样要走更新流程
+    $contentDiff = ($oldHash -ne '' -and $oldHash -ne $PayloadSha)
+    if ($oldVer -eq $AppVersion -and -not $contentDiff -and -not $script:globalPrefs['skipUpdatePrompt'] -and $found.Count -eq 1) {
       Run $projDir
     } else {
       Update $cfg $projDir $oldVer
