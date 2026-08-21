@@ -1169,6 +1169,8 @@ async function stopService() {
     log(ok(`服务已停止（${src}）`))
     try { fs.unlinkSync(PID_FILE) } catch {}
     killTray()
+    if (cfTunnelRunning()) { log(dim('停止隧道（Cloudflare）')); cfStopTunnel() }
+    if (sfpRunning()) { log(dim('停止隧道（SakuraFRP）')); sfpStop() }
     // 停止后删除防火墙规则，防止端口被外部利用
     if (config.firewall?.enabled !== false && config.firewall?.ruleName) {
       removeFirewall(config.firewall.ruleName)
@@ -1414,6 +1416,8 @@ async function runningMenu(child = null, isBackground = false) {
               else log(dim('服务可能已自行退出'))
             }
             try { fs.unlinkSync(PID_FILE) } catch {}
+            if (cfTunnelRunning()) { log(dim('停止隧道（Cloudflare）')); cfStopTunnel() }
+            if (sfpRunning()) { log(dim('停止隧道（SakuraFRP）')); sfpStop() }
             if (config.firewall?.enabled !== false && config.firewall?.ruleName) {
               removeFirewall(config.firewall.ruleName)
             }
@@ -1449,6 +1453,8 @@ async function runningMenu(child = null, isBackground = false) {
             }
             try { fs.unlinkSync(PID_FILE) } catch {}
             killTray()
+            if (cfTunnelRunning()) { log(dim('停止隧道（Cloudflare）')); cfStopTunnel() }
+            if (sfpRunning()) { log(dim('停止隧道（SakuraFRP）')); sfpStop() }
             if (config.firewall?.enabled !== false && config.firewall?.ruleName) {
               removeFirewall(config.firewall.ruleName)
             }
