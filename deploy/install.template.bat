@@ -701,14 +701,55 @@ function Invoke-SelfUpdate {
     ('https://github.com/' + $repo + '/releases/latest/download/Z80Z-chat.bat')
   )
   $newVer = ''
+  # 带超时跳过的下载：5秒内未完成可按 S 跳过
+  $skipUpdate = $false
+  $deadline = [DateTime]::Now.AddSeconds(5)
+  $found = $false
   foreach ($url in $candidates) {
     try {
-      Download-Small $url $tmp 5000
-      $newVer = Read-BatVersion $tmp
-      if ($newVer -ne '') { break }
+      $job = Start-Job -ScriptBlock {
+        param($u, $f)
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $wc = New-Object Net.WebClient
+        $wc.DownloadFile($u, $f)
+      } -ArgumentList $url, $tmp
+      while (-not $job.HasExited) {
+        if ([DateTime]::Now -ge $deadline) {
+          Ln ''
+          Hint '  网络较慢，按 S 跳过更新，或等待下载完成...'
+          $key = $null
+          if ([Console]::KeyAvailable) {
+            $key = [Console]::ReadKey($true).Key
+          }
+          if ($key -eq 'S') {
+            Stop-Job $job -ErrorAction SilentlyContinue
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+            $skipUpdate = $true
+            break
+          }
+          $deadline = $deadline.AddSeconds(1)
+        }
+        Start-Sleep -Milliseconds 200
+      }
+      if ($skipUpdate) { break }
+      Receive-Job $job -ErrorAction SilentlyContinue
+      Remove-Job $job -Force -ErrorAction SilentlyContinue
+      if ((Test-Path $tmp) -and (Get-Item $tmp).Length -gt 1000) {
+        $newVer = Read-BatVersion $tmp
+        if ($newVer -ne '') { $found = $true; break }
+      }
+      Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     } catch {
       Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     }
+  }
+  if ($skipUpdate) {
+    Record-UpdateCheck
+    Ln ''
+    Info '已跳过更新，继续当前流程'
+    Ln ''
+    return
   }
   if ($newVer -eq '') { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; Record-UpdateCheck; return }
   if ((Compare-Version $newVer $AppVersion) -le 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; Record-UpdateCheck; return }
@@ -721,20 +762,39 @@ function Invoke-SelfUpdate {
       return
     }
   } catch { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; Record-UpdateCheck; return }
-  H1 '启动器更新'
-  Ln ''
-  Info ('发现新版本 v' + $newVer + '（当前 v' + $AppVersion + '）')
-  Ln ''
-  Hint '  更新后需要重新双击本文件进入新版'
+  # 更新界面
   Ln ''
   Separator
   Ln ''
-  $ch = (Read-Host '  是否更新启动器？(Y/N)').Trim()
-  if ($ch -ne 'Y' -and $ch -ne 'y') {
+  H1 '发现新版本'
+  Ln ''
+  Info ('  当前版本:  v' + $AppVersion)
+  Info ('  最新版本:  v' + $newVer)
+  Ln ''
+  Separator
+  Ln ''
+  Hint '  1. 立即更新（推荐）'
+  Hint '  2. 跳过此版本'
+  Hint '  3. 稍后提醒（24h 后再次检查）'
+  Ln ''
+  Separator
+  Ln ''
+  $ch = ''
+  while ($ch -notmatch '^[123]$') {
+    $ch = (Read-Host '  请选择 (1/2/3)').Trim()
+  }
+  if ($ch -eq '2') {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     Record-UpdateCheck
     Ln ''
-    Info '已取消，继续当前流程'
+    Info '已跳过此版本'
+    Ln ''
+    return
+  }
+  if ($ch -eq '3') {
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    Ln ''
+    Info '24 小时后将再次检查更新'
     Ln ''
     return
   }
