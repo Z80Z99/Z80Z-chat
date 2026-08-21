@@ -1790,22 +1790,9 @@ async function cfStart() {
   })
   child.unref()
   try { fs.writeFileSync(CF_PID_FILE, String(child.pid)) } catch {}
-  log(dim('隧道启动中（首次建立连接需 10~30 秒）...'))
-  const url = `https://${cfHostname()}/api/config`
-  const reachable = await new Promise((resolve) => {
-    const start = Date.now()
-    const tick = async () => {
-      if (Date.now() - start > 30000) return resolve(false)
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(4000) })
-        if (res.ok) return resolve(true)
-      } catch {}
-      setTimeout(tick, 2000)
-    }
-    tick()
-  })
-  if (reachable) return { ok: true, msg: `公网访问正常：${url}` }
-  return { ok: true, msg: `已启动（公网连接建立中，稍后访问 https://${cfHostname()}）` }
+  log(dim('隧道已启动，公网连接建立中（首次需 10~30 秒）...'))
+  log(dim('  可稍后选择「测试公网访问」确认是否可达'))
+  return { ok: true, msg: '隧道已在后台启动' }
 }
 
 // 首次配置向导：登录 → 创建隧道 → 绑定域名 → 写配置 → 启动
@@ -2215,25 +2202,10 @@ async function sfpStart() {
   })
   child.unref()
   try { fs.writeFileSync(SFP_PID_FILE, String(child.pid)) } catch {}
-  log(dim('隧道启动中（连接国内节点通常 3~10 秒）...'))
+  log(dim('隧道已启动，公网连接建立中（通常 3~10 秒）...'))
+  log(dim('  可稍后选择「测试公网访问」确认是否可达'))
   const url = sfpAccessUrl()
-  if (url) {
-    const reachable = await new Promise((resolve) => {
-      const start = Date.now()
-      const tick = async () => {
-        if (Date.now() - start > 30000) return resolve(false)
-        try {
-          const res = await fetch(url, { signal: AbortSignal.timeout(4000) })
-          if (res.ok) return resolve(true)
-        } catch {}
-        setTimeout(tick, 2000)
-      }
-      tick()
-    })
-    if (reachable) return { ok: true, msg: `公网访问正常：${url}` }
-    return { ok: true, msg: `已启动（公网连接建立中，稍后访问 ${url}）` }
-  }
-  return { ok: true, msg: '已启动（访问地址请到 SakuraFrp 面板「隧道列表」查看）' }
+  return { ok: true, msg: url ? `已在后台启动，访问地址：${url}` : '已在后台启动' }
 }
 
 // 公网访问测试
