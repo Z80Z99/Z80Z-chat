@@ -324,11 +324,10 @@ public class Z80Tray : NativeWindow {
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
     public uint dwInfoFlags; public Guid guidItem; public IntPtr hBalloonIcon;
   }
-  const uint NIM_ADD = 0; const uint NIM_DELETE = 2; const uint NIM_SETVERSION = 4;
-  const uint NIF_MESSAGE = 1; const uint NIF_ICON = 2; const uint NIF_TIP = 4; const uint NIF_GUID = 0x20;
-  const uint NOTIFYICON_VERSION_4 = 4; const int WM_USER = 0x400;
+  const uint NIM_ADD = 0; const uint NIM_DELETE = 2;
+  const uint NIF_MESSAGE = 1; const uint NIF_ICON = 2; const uint NIF_TIP = 4;
+  const int WM_USER = 0x400;
   const int WM_LBUTTONDBLCLK = 0x0203; const int WM_RBUTTONUP = 0x0205;
-  public static readonly Guid TrayGuid = new Guid("7C2F4A1B-9E3D-4C5A-B6F8-2D1E0A9B3C44");
   const int UID = 0x0D5;
   [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
   static extern bool Shell_NotifyIcon(uint m, ref NID n);
@@ -340,9 +339,9 @@ public class Z80Tray : NativeWindow {
     _menu = menu;
     CreateHandle(new CreateParams());
     NID n = new NID(); n.cbSize = Marshal.SizeOf(typeof(NID)); n.hWnd = Handle; n.uID = UID;
-    n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID; n.uCallbackMessage = WM_USER + 1;
-    n.hIcon = h; n.szTip = tip; n.guidItem = TrayGuid;
-    Shell_NotifyIcon(NIM_ADD, ref n); n.uTimeoutOrVersion = NOTIFYICON_VERSION_4; Shell_NotifyIcon(NIM_SETVERSION, ref n);
+    n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP; n.uCallbackMessage = WM_USER + 1;
+    n.hIcon = h; n.szTip = tip;
+    Shell_NotifyIcon(NIM_ADD, ref n);
   }
   protected override void WndProc(ref Message m) {
     if (m.Msg == WM_USER + 1) {
@@ -363,8 +362,6 @@ public class Z80Tray : NativeWindow {
     n.cbSize = Marshal.SizeOf(typeof(NID));
     n.hWnd = Handle;
     n.uID = UID;
-    n.uFlags = NIF_GUID;
-    n.guidItem = TrayGuid;
     Shell_NotifyIcon(NIM_DELETE, ref n);
     DestroyHandle();
   }
@@ -399,8 +396,24 @@ try {
   Add-Type -TypeDefinition $TrayCs -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing') -ErrorAction Stop
   $bmp = New-Object System.Drawing.Bitmap 16,16
   $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.Clear([System.Drawing.Color]::FromArgb(255, 88, 101, 242))
-  $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)), 4, 3, 8, 10)
+  $g.SmoothingMode = 'AntiAlias'
+  $g.TextRenderingHint = 'ClearTypeGridFit'
+  $g.Clear([System.Drawing.Color]::Transparent)
+  $bg = [System.Drawing.Color]::FromArgb(255, 88, 101, 242)
+  $brush = New-Object System.Drawing.SolidBrush $bg
+  $g.FillRectangle($brush, 2, 1, 12, 10)
+  $g.FillEllipse($brush, 0, 0, 5, 5)
+  $g.FillEllipse($brush, 9, 0, 5, 5)
+  $g.FillEllipse($brush, 0, 6, 5, 5)
+  $g.FillEllipse($brush, 9, 6, 5, 5)
+  $pts = @()
+  $pts += New-Object System.Drawing.Point(4,11)
+  $pts += New-Object System.Drawing.Point(3,15)
+  $pts += New-Object System.Drawing.Point(8,11)
+  $g.FillPolygon($brush, $pts)
+  $brush.Dispose()
+  $f = New-Object System.Drawing.Font('Consolas', 7, [System.Drawing.FontStyle]::Bold)
+  $g.DrawString('Z', $f, ([System.Drawing.Brushes]::White), 3.5, 0.5)
   $g.Dispose()
   $menu = New-Object System.Windows.Forms.ContextMenuStrip
   $mOpen = New-Object System.Windows.Forms.ToolStripMenuItem('打开管理面板')
