@@ -306,6 +306,7 @@ function buildTrayScript() {
   const q = (s) => s.replace(/'/g, "''")
   return `param()
 $ErrorActionPreference = 'Continue'
+try { [System.IO.File]::WriteAllText((Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '.z80z-tray.pid'), [string]$PID) } catch {}
 
 $TrayCs = @'
 using System;
@@ -445,11 +446,13 @@ function ensureTray() {
     }
     const psFile = path.join(outerRoot, '.z80z-tray.ps1')
     fs.writeFileSync(psFile, '\uFEFF' + buildTrayScript(), 'utf8')
-    const tray = spawn('powershell.exe', [
+    // Windows 上 detached + unref 不够：关闭终端时子进程仍被杀
+    // 用 start /min 启动，进程完全脱离当前终端进程树
+    // PS 脚本内自行写 PID 文件（$PID），无需外部追踪
+    spawn('cmd.exe', [
+      '/c', 'start', '/min', 'powershell.exe',
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', psFile
-    ], { detached: true, stdio: 'ignore', windowsHide: true })
-    tray.unref()
-    try { fs.writeFileSync(trayPidFile, String(tray.pid)) } catch {}
+    ], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
   } catch {}
 }
 
