@@ -313,6 +313,19 @@ function buildTrayScript() {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# 最小化到任务栏的窗口：给一个有意义的标题
+try { $host.UI.RawUI.WindowTitle = $SiteName + ' 服务托盘' } catch {}
+# 启动后立即隐藏控制台窗口：卡巴斯基会拦截"启动参数 -WindowStyle Hidden"
+# 的常驻进程，但运行时隐藏窗口不触发；托盘常驻不受影响
+try {
+  $sig = '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
+  Add-Type -MemberDefinition $sig -Name Win32 -Namespace Native -ErrorAction SilentlyContinue
+  $proc = Get-Process -Id $PID
+  $proc.Refresh()
+  $hwnd = $proc.MainWindowHandle
+  if ($hwnd -ne 0) { [Native.Win32]::ShowWindow($hwnd, 0) }
+} catch {}
+
 function Test-Service {
   if (-not (Test-Path -LiteralPath $PidFile)) { return $false }
   try {
@@ -392,8 +405,10 @@ function ensureTray() {
     }
     const psFile = path.join(outerRoot, '.z80z-tray.ps1')
     fs.writeFileSync(psFile, '\uFEFF' + buildTrayScript(), 'utf8')
+    // 注意：不能用 -WindowStyle Hidden——卡巴斯基等安全软件会拦截
+    // "隐藏窗口 PowerShell 常驻 + NotifyIcon"行为并终止进程；用最小化窗口可正常存活
     const tray = spawn('powershell.exe', [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', psFile
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Minimized', '-File', psFile
     ], { detached: true, stdio: 'ignore', windowsHide: true })
     tray.unref()
     try { fs.writeFileSync(trayPidFile, String(tray.pid)) } catch {}
