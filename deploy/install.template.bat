@@ -1534,7 +1534,7 @@ function Update($cfg, $projDir, $oldVer) {
     $oldInstalledAt = [string](Get-JsonValue $mk 'installedAt')
     $mkHash = [string](Get-JsonValue $mk 'payloadHash')
   } catch {}
-  $contentDiff = ($mkHash -ne '' -and $mkHash -ne $PayloadSha)
+  $contentDiff = ($mkHash -ne '' -and $mkHash -ne $PayloadSha) -or ($mkHash -eq '' -and $PayloadSha -ne '')
   $isLatest = ($oldVer -eq $AppVersion -and -not $contentDiff)
   H1 'Z80Z-chat 更新'
   Ln ''
@@ -1913,7 +1913,7 @@ try {
     } catch {}
     # 版本相同且内容指纹一致才直接进入管理；同版本但内容指纹不同
     # （bat 内容热修复、未 bump 版本）同样要走更新流程
-    $contentDiff = ($oldHash -ne '' -and $oldHash -ne $PayloadSha)
+    $contentDiff = ($oldHash -ne '' -and $oldHash -ne $PayloadSha) -or ($oldHash -eq '' -and $PayloadSha -ne '')
     if ($oldVer -eq $AppVersion -and -not $contentDiff -and -not $script:globalPrefs['skipUpdatePrompt'] -and $found.Count -eq 1) {
       Run $projDir
     } else {
