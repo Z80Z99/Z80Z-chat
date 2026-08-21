@@ -140,7 +140,7 @@ function validateConfig() {
 
 function killPid(pid) {
   try {
-    execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' })
+    execSync(`taskkill /T /F /PID ${pid}`, { stdio: 'ignore' })
     return true
   } catch {
     return false
@@ -1696,11 +1696,16 @@ function cfTunnelRunning() {
 }
 
 function cfStopTunnel() {
-  const pid = cfTunnelRunning()
-  if (!pid) return false
-  const killed = killPid(pid)
-  if (killed) { try { fs.unlinkSync(CF_PID_FILE) } catch {} }
-  return killed
+  let pid = cfTunnelRunning()
+  if (pid) {
+    if (killPid(pid)) { try { fs.unlinkSync(CF_PID_FILE) } catch {}; return true }
+  }
+  // 兜底：按进程名杀 cloudflared
+  try {
+    execSync('taskkill /T /F /IM cloudflared.exe', { stdio: 'ignore' })
+    try { fs.unlinkSync(CF_PID_FILE) } catch {}
+    return true
+  } catch { return false }
 }
 
 // 版本校验（下载后/已安装时读取版本号）
@@ -2089,11 +2094,16 @@ function sfpRunning() {
 }
 
 function sfpStop() {
-  const pid = sfpRunning()
-  if (!pid) return false
-  const killed = killPid(pid)
-  if (killed) { try { fs.unlinkSync(SFP_PID_FILE) } catch {} }
-  return killed
+  let pid = sfpRunning()
+  if (pid) {
+    if (killPid(pid)) { try { fs.unlinkSync(SFP_PID_FILE) } catch {}; return true }
+  }
+  // 兜底：按进程名杀 frpc
+  try {
+    execSync('taskkill /T /F /IM frpc.exe', { stdio: 'ignore' })
+    try { fs.unlinkSync(SFP_PID_FILE) } catch {}
+    return true
+  } catch { return false }
 }
 
 // 版本校验（frpc -v）
