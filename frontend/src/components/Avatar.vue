@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = withDefaults(defineProps<{
   src?: string | null
@@ -23,10 +23,19 @@ const props = withDefaults(defineProps<{
   title: ''
 })
 
+const emit = defineEmits<{ error: [event: Event] }>()
+const imageElement = ref<HTMLImageElement | null>(null)
+
 const validSrc = computed(() => {
   const s = props.src
   return s && s !== 'default' ? s : null
 })
+
+function onImageError(event: Event) {
+  const image = event.currentTarget as HTMLImageElement | null
+  if (image !== imageElement.value || image?.getAttribute('src') !== validSrc.value) return
+  emit('error', event)
+}
 
 const initial = computed(() => (props.name || '?').charAt(0).toUpperCase())
 
@@ -44,7 +53,7 @@ const sizeClass = computed(() => ({
   <div class="relative flex-shrink-0" :title="title">
     <div class="rounded-full flex items-center justify-center overflow-hidden"
          :class="[sizeClass, bg, border, ring]">
-      <img v-if="validSrc" :src="validSrc" class="w-full h-full object-cover" />
+      <img v-if="validSrc" :key="validSrc" ref="imageElement" :src="validSrc" class="w-full h-full object-cover" @error="onImageError" />
       <span v-else class="text-white font-bold" :class="textClass">{{ initial }}</span>
     </div>
     <div v-if="status" class="w-3 h-3 rounded-full absolute -bottom-0.5 -right-0.5 border-2"

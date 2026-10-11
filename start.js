@@ -1,4 +1,4 @@
-import { spawn, spawnSync, execSync } from 'child_process'
+import { spawn, spawnSync, execSync, execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -843,23 +843,25 @@ async function installAndBuild() {
   }
 
   console.log('')
-  log('安装依赖（npm install，可能需要几分钟）...')
+  log('安装依赖（npm ci --include=dev，可能需要几分钟）...')
   // 经 PowerShell 中间层执行：node 直接 spawn 子进程时，若父进程
   // 工作目录含空格（如 E:\Opencode Project），vite 构建会异常
   try {
-    execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "npm install --registry=${registry}"`, { cwd: projectRoot, stdio: 'inherit' })
+    execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '& npm.cmd ci --include=dev --registry $env:Z80Z_NPM_REGISTRY; exit $LASTEXITCODE'], {
+      cwd: projectRoot, stdio: 'inherit', windowsHide: true, env: { ...process.env, Z80Z_NPM_REGISTRY: registry }
+    })
   } catch {
     log(bad('依赖安装失败，请检查网络后重试'))
     await waitKey()
     return false
   }
 
-  log('构建前端（npm run build）...')
+  log('检查并构建前端（npm run check:frontend）...')
   // 同上走 PowerShell 中间层；vite 5.4 另有 html-inline-proxy 偶发失败（重跑即好），自动重试一次
   let buildOk = false
   for (let attempt = 1; attempt <= 2 && !buildOk; attempt++) {
     try {
-      execSync('powershell -NoProfile -ExecutionPolicy Bypass -Command "npm run build"', { cwd: projectRoot, stdio: 'inherit' })
+      execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '& npm.cmd run check:frontend; exit $LASTEXITCODE'], { cwd: projectRoot, stdio: 'inherit', windowsHide: true })
       buildOk = true
     } catch {
       if (attempt === 1) {
@@ -900,7 +902,7 @@ async function firstDeployMenu(needWarning) {
       console.log('')
     }
     console.log('')
-    console.log(item('1', '安装依赖并构建前端', 'npm install + npm run build'))
+    console.log(item('1', '安装依赖并构建前端', '按锁文件安装 + 完整前端验收'))
     console.log(item('2', '项目介绍', '功能介绍与使用方式'))
     console.log(item('3', '退出', ''))
     console.log('')

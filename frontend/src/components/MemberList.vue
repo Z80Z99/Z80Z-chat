@@ -9,7 +9,7 @@ import Avatar from './Avatar.vue'
 
 const emit = defineEmits<{ 'open-user-profile': [userId: string]; 'close': [] }>()
 
-defineProps<{ mobileOpen?: boolean }>()
+defineProps<{ mobileOpen?: boolean; isMobile?: boolean; desktopOpen?: boolean }>()
 
 const serverStore = useServerStore()
 const authStore = useAuthStore()
@@ -51,8 +51,9 @@ const offlineMembers = computed(() =>
 <template>
   <div v-if="mobileOpen" class="fixed inset-0 bg-black/60 z-40 md:hidden" @click="emit('close')"></div>
 
-  <div class="fixed inset-y-0 right-0 z-40 md:static md:z-auto w-[75vw] max-w-[280px] md:w-member-bar md:min-w-member-bar bg-discord-800 flex flex-col transition-transform duration-200 transform md:translate-x-0"
-       :class="mobileOpen ? 'translate-x-0' : 'translate-x-full'">
+  <div id="chat-members" class="chat-member-panel fixed inset-y-0 right-0 z-40 md:static md:z-auto w-[85vw] max-w-[300px] md:w-member-bar md:min-w-member-bar bg-discord-800 flex flex-col transition-transform duration-200 transform md:translate-x-0"
+       :class="[mobileOpen ? 'translate-x-0' : 'translate-x-full', desktopOpen === false ? 'md:hidden' : '']"
+       :inert="(isMobile ? !mobileOpen : desktopOpen === false) ? true : undefined" :aria-hidden="isMobile ? !mobileOpen : desktopOpen === false" role="complementary" aria-label="成员列表">
     <div class="h-12 shadow-md bg-discord-800 z-10 flex items-center justify-end pr-2 md:hidden">
       <button @click="emit('close')" class="p-1 text-discord-200 hover:text-white" title="关闭">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -69,13 +70,15 @@ const offlineMembers = computed(() =>
         </div>
 
         <div v-for="member in voiceMembers" :key="member.userId"
+             role="button" tabindex="0" @keydown.enter.self.prevent="emit('open-user-profile', member.userId)" @keydown.space.self.prevent="emit('open-user-profile', member.userId)"
              class="member-item" @click="emit('open-user-profile', member.userId)">
           <Avatar :src="member.user?.avatar"
                   :name="member.user?.nickname || member.user?.username"
                   status="bg-green border-discord-800" />
           <span class="text-sm text-green truncate">{{ member.user?.nickname || member.user?.username }}</span>
           <span v-if="member.userId === selfId" class="text-xs text-discord-300 font-normal">（你）</span>
-          <svg class="ml-auto w-4 h-4 text-green flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" title="语音中">
+          <svg class="ml-auto w-4 h-4 text-green flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" role="img" aria-label="语音中">
+            <title>语音中</title>
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
           </svg>
         </div>
@@ -89,6 +92,7 @@ const offlineMembers = computed(() =>
       </div>
 
       <div v-for="member in onlineMembers" :key="member.userId"
+           role="button" tabindex="0" @keydown.enter.self.prevent="emit('open-user-profile', member.userId)" @keydown.space.self.prevent="emit('open-user-profile', member.userId)"
            class="member-item" @click="emit('open-user-profile', member.userId)">
         <Avatar :src="member.user?.avatar"
                 :name="member.user?.nickname || member.user?.username"
@@ -103,6 +107,7 @@ const offlineMembers = computed(() =>
       </div>
 
       <div v-for="member in offlineMembers" :key="member.userId"
+           role="button" tabindex="0" @keydown.enter.self.prevent="emit('open-user-profile', member.userId)" @keydown.space.self.prevent="emit('open-user-profile', member.userId)"
            class="member-item opacity-60" @click="emit('open-user-profile', member.userId)">
         <span class="grayscale">
           <Avatar :src="member.user?.avatar"

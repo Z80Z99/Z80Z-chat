@@ -10,9 +10,31 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
-export function formatMessageContent(content: string): string {
-  const esc = escapeHtml(content)
-  return esc
-    .replace(/@everyone/g, '<span class="text-yellow bg-yellow/20 px-1 rounded font-medium">@everyone</span>')
-    .replace(/@(\w+)/g, '<span class="text-blurple font-medium">@$1</span>')
+export interface MentionDisplayUser { id: string; username?: string; nickname?: string }
+
+export function messageContentText(content: string, users: MentionDisplayUser[] = []): string {
+  const names = new Map(users.map(user => [user.id, user.nickname || user.username || '成员']))
+  return content.replace(/<@([a-zA-Z0-9_-]{1,128})>/g, (_, id) => `@${names.get(id) || '已离开的成员'}`)
+}
+
+export function formatMessageContent(content: string, users: MentionDisplayUser[] = [], mentionEveryone = false): string {
+  const names = new Map(users.map(user => [user.id, user.nickname || user.username || '成员']))
+  const parts: string[] = []
+  const pattern = /<@([a-zA-Z0-9_-]{1,128})>/g
+  const plain = (text: string) => {
+    if (!mentionEveryone) return escapeHtml(text)
+    return escapeHtml(text).replace(/(^|[\s([{，。！？；：、])@everyone(?=$|[\s)\]},.!?;:，。！？；：、])/g,
+      '$1<span class="message-mention message-mention-everyone">@everyone</span>')
+  }
+  let position = 0
+  for (const match of content.matchAll(pattern)) {
+    parts.push(plain(content.slice(position, match.index)))
+    const id = match[1]
+    const name = names.get(id)
+    parts.push(name ? `<button type="button" class="message-mention" data-mention-id="${escapeHtml(id)}">@${escapeHtml(name)}</button>`
+      : '<span class="message-mention message-mention-unavailable">@已离开的成员</span>')
+    position = match.index! + match[0].length
+  }
+  parts.push(plain(content.slice(position)))
+  return parts.join('')
 }

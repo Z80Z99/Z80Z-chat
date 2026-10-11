@@ -23,6 +23,8 @@ import serverRoutes from './routes/servers.js'
 import channelRoutes from './routes/channels.js'
 import categoryRoutes from './routes/categories.js'
 import messageRoutes from './routes/messages.js'
+import readStateRoutes from './routes/read-state.js'
+import mentionRoutes from './routes/mentions.js'
 import roleRoutes from './routes/roles.js'
 import memberRoutes from './routes/members.js'
 import inviteRoutes from './routes/invites.js'
@@ -84,6 +86,8 @@ app.use('/api/servers', serverRoutes)
 app.use('/api/channels', channelRoutes)
 app.use('/api/categories', categoryRoutes)
 app.use('/api/messages', messageRoutes)
+app.use('/api/read-state', readStateRoutes)
+app.use('/api/mentions', mentionRoutes)
 app.use('/api/roles', roleRoutes)
 app.use('/api/members', memberRoutes)
 app.use('/api/invites', inviteRoutes)

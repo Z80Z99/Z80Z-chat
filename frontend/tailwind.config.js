@@ -13,24 +13,24 @@ export default {
     extend: {
       colors: {
         discord: {
-          900: '#1e1f22',
-          800: '#2b2d31',
-          700: '#313338',
-          600: '#383a40',
-          500: '#404249',
-          400: '#4e5058',
-          300: '#6d6f78',
-          200: '#949ba4',
-          100: '#b5bac1',
-          50: '#dbdee1'
+          900: 'rgb(var(--chat-color-rail) / <alpha-value>)',
+          800: 'rgb(var(--chat-color-nav) / <alpha-value>)',
+          700: 'rgb(var(--chat-color-main) / <alpha-value>)',
+          600: 'rgb(var(--chat-color-surface) / <alpha-value>)',
+          500: 'rgb(var(--chat-color-hover) / <alpha-value>)',
+          400: 'rgb(var(--chat-color-border-strong) / <alpha-value>)',
+          300: 'rgb(var(--chat-color-text-muted) / <alpha-value>)',
+          200: 'rgb(var(--chat-color-text-secondary) / <alpha-value>)',
+          100: 'rgb(var(--chat-color-text-secondary) / <alpha-value>)',
+          50: 'rgb(var(--chat-color-text-primary) / <alpha-value>)'
         },
-        blurple: '#5865f2',
-        'blurple-hover': '#4752c4',
-        green: '#23a55a',
-        'green-hover': '#1a8c4a',
-        red: '#da373c',
-        'red-hover': '#a1282b',
-        yellow: '#f0b232'
+        blurple: 'rgb(var(--chat-color-accent) / <alpha-value>)',
+        'blurple-hover': 'rgb(var(--chat-color-accent-hover) / <alpha-value>)',
+        green: 'rgb(var(--chat-color-success) / <alpha-value>)',
+        'green-hover': 'rgb(var(--chat-color-success-hover) / <alpha-value>)',
+        red: 'rgb(var(--chat-color-danger) / <alpha-value>)',
+        'red-hover': 'rgb(var(--chat-color-danger-hover) / <alpha-value>)',
+        yellow: 'rgb(var(--chat-color-warning) / <alpha-value>)'
       },
       width: {
         'server-bar': '72px',

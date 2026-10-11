@@ -7,15 +7,29 @@ function getToken(): string | null {
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const token = getToken()
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(typeof FormData !== 'undefined' && options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string> || {})
   }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || '请求失败')
-  return data
+  const controller = new AbortController()
+  let timedOut = false
+  const abort = () => controller.abort()
+  if (options.signal?.aborted) abort()
+  else options.signal?.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, 15000)
+  try {
+    const res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw Object.assign(new Error(data.error || '请求失败'), { status: res.status })
+    return data
+  } catch (error) {
+    if (timedOut) throw new Error('请求超时，请重试')
+    throw error
+  } finally {
+    clearTimeout(timer)
+    options.signal?.removeEventListener('abort', abort)
+  }
 }
 
 export const api = {
@@ -104,11 +118,45 @@ export const api = {
   sendMessage(data: any) {
     return request('/messages/send', { method: 'POST', body: JSON.stringify(data) })
   },
+  getReadStates(serverId: string) {
+    return request(`/read-state/${encodeURIComponent(serverId)}`)
+  },
+  markChannelRead(channelId: string, messageId: string) {
+    return request(`/read-state/${encodeURIComponent(channelId)}`, { method: 'POST', body: JSON.stringify({ messageId }) })
+  },
   editMessage(id: string, content: string) {
     return request(`/messages/${id}`, { method: 'PUT', body: JSON.stringify({ content }) })
   },
   deleteMessage(id: string) {
     return request(`/messages/${id}`, { method: 'DELETE' })
+  },
+  setMessageReaction(id: string, emoji: string, active: boolean) {
+    return request(`/messages/${encodeURIComponent(id)}/reactions`, { method: 'PUT', body: JSON.stringify({ emoji, active }) })
+  },
+  setMessagePin(id: string, pinned: boolean) {
+    return request(`/messages/${encodeURIComponent(id)}/pin`, { method: 'PUT', body: JSON.stringify({ pinned }) })
+  },
+  getPinnedMessages(channelId: string) {
+    return request(`/messages/pins/${encodeURIComponent(channelId)}`)
+  },
+  searchMessages(channelId: string, filters: { q?: string; authorId?: string; before?: string; limit?: number } = {}) {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '') query.set(key, String(value))
+    return request(`/messages/search/${encodeURIComponent(channelId)}?${query}`)
+  },
+  getMessageContext(channelId: string, messageId: string) {
+    return request(`/messages/context/${encodeURIComponent(channelId)}/${encodeURIComponent(messageId)}`)
+  },
+  getNotifications(limit = 50, before?: number) {
+    const query = new URLSearchParams({ limit: String(limit) })
+    if (before !== undefined) query.set('before', String(before))
+    return request(`/mentions?${query}`)
+  },
+  getNotificationPreference(channelId: string) {
+    return request(`/mentions/preferences/${encodeURIComponent(channelId)}`)
+  },
+  setNotificationPreference(channelId: string, mode: 'all' | 'mentions' | 'mute') {
+    return request(`/mentions/preferences/${encodeURIComponent(channelId)}`, { method: 'PUT', body: JSON.stringify({ mode }) })
   },
 
   // Roles
@@ -162,6 +210,11 @@ export const api = {
   },
 
   // Upload
+  uploadCommunityImage(serverId: string, kind: 'avatar' | 'banner', file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request(`/upload/community/${encodeURIComponent(serverId)}/${kind}`, { method: 'POST', body: formData })
+  },
   uploadImage(file: File) {
     const formData = new FormData()
     formData.append('file', file)

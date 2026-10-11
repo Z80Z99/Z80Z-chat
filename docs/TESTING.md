@@ -2,70 +2,80 @@
 
 ## 1. 运行方式
 
+完整测试使用 Node.js 24，先按锁文件安装开发与运行依赖：
+
 ```bash
-npm test          # 等价于 node --test（自动发现 test/*.test.js）
+npm ci --include=dev
+npm test                 # node --test --test-concurrency=1
+npm run check:frontend   # 完整 Vue 类型、生产构建与界面规则检查
 ```
 
-- 全部用例并行执行，总耗时约 8 秒
-- 测试失败时进程退出码非 0，可用于 CI 集成
+- 测试文件串行运行，避免服务端口和媒体资源互相干扰；耗时随覆盖范围与机器变化。
+- 部分前端回归直接加载 TypeScript 源码，使用 Node.js 24 的类型剥离能力。
+- 测试失败时进程退出码非 0，可用于 CI 集成；实际用例数和结果以当前输出为准。
+- 安装器升级回归调用真实 Windows PowerShell，非 Windows 系统跳过这组用例。Linux 上通过其余测试不等于已验收 Windows 安装器。
 
-## 2. 测试架构（node:test）
+## 2. 测试架构
 
-使用 **Node 原生测试框架**（`node:test` + `node:assert/strict`），**零额外依赖**（无 Jest/Vitest/Supertest）。
+测试组织与断言使用 Node 原生 `node:test` 和 `node:assert/strict`，不使用 Jest、Vitest 或 Supertest。
+后端回归启动真实服务并调用 REST / WebSocket；前端回归加载实际工具与 store，部分组件编译 SFC 后使用真实 Vue 运行时渲染。
+Vue、TypeScript 和 `vue-tsc` 等来自项目开发依赖，完整套件不能省略开发依赖。
 
-```
-test/
-├── helpers.js           # 测试基础设施
-├── auth.test.js         # 认证（9 例）
-├── servers.test.js      # 服务器/频道/角色权限（9 例）
-├── messages.test.js     # 消息全流程（8 例）
-├── websocket.test.js    # WS 认证/join-channel/广播（7 例）
-├── upload.test.js       # 上传与附件清理（6 例）
-├── roles.test.js        # 角色层级（9 例）
-├── ws-sync.test.js      # 消息编辑/删除 WS 同步（3 例）
-├── invites.test.js      # 邀请权限/脱敏（6 例）
-├── voice.test.js        # 语音权限/信令隔离（6 例）
-├── db-atomic.test.js    # 原子写入可靠性（4 例）
-├── backup.test.js       # 备份恢复（6 例）
-└── logger.test.js       # 日志模块（5 例）
-```
+| 类型 | 代表文件 | 验证方式 |
+|------|----------|----------|
+| 服务与持久化 | `helpers.js`、`messages.test.js`、`read-state.test.js`、`db-fsync.test.js` | 独立服务进程、实际 API / WebSocket、临时数据库与故障注入 |
+| 前端状态与媒体 | `chat-store.test.js`、`notification-store.test.js`、`voice-core.test.js`、`screen-share-video.test.js` | 加载实际实现，控制请求、会话和媒体资源边界 |
+| Vue 图片事件 | `avatar-events.test.js` | 实际 SFC 编译与 Vue 渲染，验证图片错误、占位和迟到事件 |
+| Vue 类型检查 | `frontend-typecheck.test.js` | 调用真实 `vue-tsc`，同时检查合法模板与应被拒绝的模板 |
+| 分发包内容 | `release-payload.test.js` | 实际打包文件集合、ZIP 解压与 CRC、内容指纹和发布配置检查 |
+| Windows 升级 | `installer-upgrade.test.js` | 提取实际模板函数，在隔离安装副本中调用真实 Windows PowerShell |
 
-共 **79 个用例**。`helpers.js` 提供：服务生命周期（start/stop/restart）、API 请求封装、注册/建服/邀请工具、WS 连接封装、db.json 直读写。
+`helpers.js` 提供服务启动、停止、保留数据重启、API 请求、注册建服、邀请、WebSocket 连接和测试数据库读写工具。
+安装器回归只载入所需模板函数，不运行交互主入口、系统下载或防火墙授权；依赖安装和构建失败场景使用受控桩，真实安装与构建另行验收。
 
 ## 3. 测试隔离机制
 
-每个测试文件**完全独立**：
-
 | 维度 | 机制 |
 |------|------|
-| 端口 | 随机分配（3100~3899），支持并行执行不冲突 |
-| 数据目录 | 临时目录（`os.tmpdir()/z80z-chat-test-xxx`），`DATA_DIR` 注入服务进程，结束后自动删除 |
-| 日志目录 | `LOG_DIR` 指向临时目录（logger 测试用） |
-| 服务进程 | 每个文件 before() 启动独立 `server.js` 子进程，after() 关闭 |
+| 通用服务端口 | `helpers.js` 为每个文件选择 3100–3899 中的随机端口，避开浏览器 fetch 禁止的 3659；套件按文件串行执行 |
+| 服务数据 | 项目 `.test-data/z80z-chat-test-*` 下的唯一目录，通过 `DATA_DIR` 注入子进程，普通停止后清理；重启测试可暂时保留 |
+| 服务日志 | `helpers.js` 把 `LOG_DIR` 指向当前数据夹具下的 `logs/`，不使用项目默认日志目录；日志模块回归另设自己的夹具 |
+| 服务进程 | 使用当前 Node.js 启动独立 `server.js`，Windows 设置 `windowsHide: true`，结束关闭自己创建的进程 |
+| 前端与发布夹具 | 使用 `.test-data/` 下各自的唯一目录；清理前校验所属路径，只删除自身夹具 |
+| Windows 升级夹具 | 创建独立旧安装、payload、备份与回退目录，不更新已有真实安装项目 |
 
-**测试不会触碰你的真实数据**：任何情况下测试都不读写项目 `data/` 目录。
+通用服务测试的数据和日志操作使用注入的临时目录，不改写生产 `data/` 或默认 `logs/`。
+随机端口不保证与外部进程永远无冲突，遇到端口占用需查看服务启动输出。
 
 ## 4. DATA_DIR / LOG_DIR 的作用
 
 | 环境变量 | 用途 | 测试场景 |
 |----------|------|----------|
-| `DATA_DIR` | 覆盖数据根目录（db.json/uploads/backups） | 测试隔离 + 篡改 db.json 重启验证（session 过期、权限变更） |
-| `LOG_DIR` | 覆盖日志目录 | logger 测试隔离 |
+| `DATA_DIR` | 覆盖数据根目录，包含 db.json、uploads、backups 与持久化签名密钥 | 隔离服务数据、篡改测试库后重启、旧数据库迁移 |
+| `LOG_DIR` | 覆盖日志输出目录 | 通用服务测试及日志模块回归的日志隔离 |
 
-两者均由生产代码原生支持（config/index.js 与 utils/logger.js），测试与服务共用同一套配置机制，**无需测试专用代码路径**。
+两者由生产配置和日志模块原生支持，测试共用同一套配置机制。
+`readDB()` / `writeDB()` 仅访问 `helpers.js` 创建的数据目录；修改数据库后需要重启或等待预期落盘，不能依靠任意固定延时推定成功。
 
 ## 5. 当前覆盖范围
 
-- **认证**：注册/登录/重复名/弱密码/me/无效 token/无 token/session 过期自动清理
-- **权限**：服务器/频道/角色 CRUD 的 owner 与成员权限、非成员 403、转让、邀请加入、角色层级（同级/高等级禁止）、mentionEveryone、禁言、sendMessage/viewChannel
-- **消息**：发送/空消息/编辑/删除、WS 广播、编辑删除同步（message-updated/deleted）、广播隔离
-- **WebSocket**：认证 4001、join-channel 权限（成员/非成员/不存在频道）、语音 join 权限（非成员/文字频道/无 viewChannel）、信令隔离
-- **上传**：未登录 401、UUID 命名、扩展名白名单（子串绕过拒绝）、附件引用清理与保留
-- **可靠性**：原子写入（写失败旧文件保留）、备份/恢复、日志模块容错
+- 认证与权限：注册、登录、会话失效、公开资料、成员与角色权限、邀请、好友、禁言及定向广播隔离。
+- 消息与阅读：发送确认、同编号幂等重试、稳定分页、草稿与未确认附件恢复、持久化未读、可见阅读确认、编辑删除与重连同步。
+- 互动与通知：回应、置顶、搜索、上下文定位、成员提及、全体提及权限、应用内通知和频道提醒偏好，含旧请求与旧账号隔离。
+- 社区与公告：公开资料默认值、管理权限、版本冲突、上传格式与尺寸、图片裁切、失败重试、公告发布与频道推送、迟到图片错误。
+- 语音与投屏：设备测试、音量偏好、按键 / 按住发言、麦克风与播放资源清理、连接与信令隔离、切源回退、播放器状态、影院与诊断。
+- 数据可靠性：原子写入、`fsync` 与延迟写入失败、迁移失败保留旧库、备份恢复、上传签名与引用清理、日志容错。
+- 真实 Vue 与 `vue-tsc`：当前图片错误事件正常传递，旧图片或旧社区事件不能隐藏新图；合法组件 props、事件和 `data-*` 通过，缺少必填 prop、事件参数错误及不存在的模板变量被拒绝。
+- 发布 payload：排除运行数据、账号、环境与缓存；按实际配置排除运行路径；保留锁文件与管理入口；独立读取 ZIP 的 UTF-8 文件名、隐藏文件、二进制、CRC 与快照；构建指纹与发布配置检查不改写原配置或泄露秘密。
+- Windows 升级：构建端与安装端指纹一致、依赖键检测、损坏 ZIP 保留旧版、快速保留依赖和构建、完整更新准备后提交、自定义内外数据目录和隐藏文件备份、依赖 / 构建失败、换码失败完整恢复，以及恢复被占用阻断时保留可找回的旧文件路径。升级后目录改名失败保持实际目录与管理入口；内部绝对数据或日志路径阻止自动改名，避免路径失效。
+
+自动化回归不能代替实体手机软键盘、蓝牙设备听感、公网 NAT / TURN、长时间通话和真实投屏来源验收。
+浏览器与分发版的实际验收结果记录在 [优化实施记录](OPTIMIZATION-PROGRESS.md)，不在本文固定总用例数。
 
 ## 6. 编写新测试的约定
 
-1. 每个文件独立 `before(startServer)` / `after(stopServer)`
-2. 需篡改数据后重载：`readDB()/writeDB()` + `restartServer()`
-3. 断言使用 `node:assert/strict`（`assert.equal`、`assert.match` 等）
-4. 不要在主目录创建临时脚本（会被 `node --test` 误识别为 `*-test.mjs`）
+1. 服务测试使用独立 `before(startServer)` / `after(stopServer)`，只操作自己创建的进程和数据目录。
+2. 需篡改数据后重载时使用 `readDB()` / `writeDB()` 与 `restartServer()`；等待落盘使用 `waitForDB()` 等可观察条件。
+3. 使用 `node:assert/strict`，断言行为、权限或失败后的资源与数据状态，避免只复述实现文本。
+4. 临时脚本与夹具放入唯一测试目录，清理前核对绝对路径；不要在主目录创建可能被 `node --test` 自动发现的一次性脚本。
+5. Windows PowerShell 专属测试显式设置平台跳过；读取实际模板函数，禁止触发交互初始化、系统下载或防火墙授权。

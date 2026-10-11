@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useServerStore } from '../stores/server'
 import { useAuthStore } from '../stores/auth'
 import { api } from '../utils/api'
 import type { Role, Member } from '../types'
 import Avatar from './Avatar.vue'
+import CommunityProfileEditor from './CommunityProfileEditor.vue'
 
 const emit = defineEmits<{ close: [] }>()
 const router = useRouter()
@@ -15,6 +16,12 @@ const authStore = useAuthStore()
 const activeTab = ref<'overview' | 'channels' | 'roles' | 'members'>('overview')
 const roles = ref<Role[]>([])
 const members = ref<Member[]>([])
+const dialogRef = ref<HTMLElement | null>(null)
+const closeRef = ref<HTMLButtonElement | null>(null)
+const cropperActive = ref(false)
+const previousFocus = typeof document !== 'undefined' ? document.activeElement as HTMLElement | null : null
+let disposed = false
+let dataVersion = 0
 
 const isOwner = computed(() => serverStore.currentServer?.ownerId === authStore.user?.id)
 
@@ -28,16 +35,10 @@ const tabs = computed(() => {
   return list.filter(t => !t.ownerOnly || isOwner.value)
 })
 
-// Overview editing
-const serverName = ref(serverStore.currentServer?.name || '')
-const serverDesc = ref(serverStore.currentServer?.description || '')
-const saving = ref(false)
-const saveMsg = ref('')
-
 // Channel management
 const newCatName = ref('')
 const newChannelName = ref('')
-const newChannelType = ref<'text' | 'voice'>('text')
+const newChannelType = ref<'text' | 'voice' | 'announcement'>('text')
 const newChannelCategory = ref<string | null>(null)
 const renamingCat = ref<string | null>(null)
 const renamingCatValue = ref('')
@@ -45,14 +46,40 @@ const renamingChannel = ref<string | null>(null)
 const renamingChannelValue = ref('')
 const channelErr = ref('')
 
-onMounted(() => {
+onMounted(async () => {
+  await nextTick()
+  if (!disposed) closeRef.value?.focus()
+})
+watch([() => serverStore.currentServer?.id, () => authStore.user?.id], () => {
+  ++dataVersion; roles.value = []; members.value = []; editingRole.value = null
+  activeTab.value = 'overview'; cropperActive.value = false
   loadData()
 })
+onMounted(loadData)
+onBeforeUnmount(() => {
+  disposed = true; ++dataVersion
+  if (previousFocus?.isConnected) previousFocus.focus()
+})
+
+function handleKeydown(event: KeyboardEvent) {
+  if (cropperActive.value || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); emit('close'); return }
+  if (event.key !== 'Tab' || !dialogRef.value) return
+  const controls = [...dialogRef.value.querySelectorAll<HTMLElement>('button, input, textarea, select, [tabindex="0"]')]
+    .filter(element => !element.matches(':disabled') && !element.hidden && element.getClientRects().length > 0)
+  const first = controls[0], last = controls[controls.length - 1]
+  if (!first) { event.preventDefault(); dialogRef.value.focus(); return }
+  if (!dialogRef.value.contains(document.activeElement) || (event.shiftKey && document.activeElement === first)) {
+    event.preventDefault(); (event.shiftKey ? last : first).focus()
+  } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+}
 
 async function loadData() {
   if (!serverStore.currentServer) return
+  const id = serverStore.currentServer.id, userId = authStore.user?.id, token = localStorage.getItem('token'), version = ++dataVersion
   try {
-    const data = await api.getServer(serverStore.currentServer.id)
+    const data = await api.getServer(id)
+    if (disposed || version !== dataVersion || serverStore.currentServer?.id !== id || authStore.user?.id !== userId || localStorage.getItem('token') !== token) return
     roles.value = data.roles
     members.value = data.members
   } catch {}
@@ -79,38 +106,6 @@ async function handleLeave() {
     router.push('/')
   } catch (e: any) {
     alert(e.message)
-  }
-}
-
-async function handleSaveServer() {
-  if (!serverStore.currentServer) return
-  saving.value = true
-  saveMsg.value = ''
-  try {
-    await serverStore.updateServerProfile({
-      name: serverName.value.trim() || serverStore.currentServer.name,
-      description: serverDesc.value
-    })
-    saveMsg.value = '保存成功'
-  } catch (e: any) {
-    saveMsg.value = e.message || '保存失败'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function handleServerAvatarUpload(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (!input.files?.length) return
-  const file = input.files[0]
-  try {
-    const res = await api.uploadImage(file)
-    if (res.url) {
-      await serverStore.updateServerProfile({ avatar: res.url })
-      saveMsg.value = '头像已更新'
-    }
-  } catch (e: any) {
-    saveMsg.value = e.message || '上传失败'
   }
 }
 
@@ -253,11 +248,11 @@ function getMemberName(member: Member) {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
-    <div class="bg-discord-800 rounded-xl w-full max-w-3xl h-[92vh] md:h-[80vh] flex flex-col shadow-2xl overflow-hidden m-2 md:m-0">
+  <div class="modal-overlay" @click.self="!cropperActive && emit('close')" @keydown="handleKeydown">
+    <div ref="dialogRef" class="community-settings-dialog bg-discord-800 rounded-xl w-full max-w-3xl h-[92vh] md:h-[80vh] flex flex-col shadow-2xl overflow-hidden m-2 md:m-0" role="dialog" aria-modal="true" aria-labelledby="community-settings-title" tabindex="-1" :inert="cropperActive">
       <div class="flex items-center justify-between gap-3 px-4 py-4 border-b border-discord-600 md:px-6">
-        <h2 class="text-lg md:text-xl font-bold text-white truncate min-w-0">服务器设置 - {{ serverStore.currentServer?.name }}</h2>
-        <button @click="emit('close')" class="text-discord-200 hover:text-white flex-shrink-0">
+        <h2 id="community-settings-title" class="text-lg md:text-xl font-bold text-white truncate min-w-0">服务器设置 - {{ serverStore.currentServer?.name }}</h2>
+        <button ref="closeRef" type="button" aria-label="关闭服务器设置" @click="emit('close')" class="community-icon-button text-discord-200 hover:text-white flex-shrink-0">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -283,56 +278,8 @@ function getMemberName(member: Member) {
         <div class="flex-1 p-4 md:p-6 overflow-y-auto">
           <!-- Overview -->
           <div v-if="activeTab === 'overview'">
-            <h3 class="text-lg font-bold text-white mb-4">服务器概览</h3>
-
-            <div class="flex items-center gap-4 mb-5">
-              <div class="relative group flex-shrink-0">
-                <div class="w-16 h-16 rounded-2xl bg-discord-600 flex items-center justify-center overflow-hidden">
-                  <img v-if="serverStore.currentServer?.avatar && serverStore.currentServer.avatar !== 'default'"
-                       :src="serverStore.currentServer.avatar" class="w-full h-full object-cover" />
-                  <span v-else class="text-white font-bold text-lg">
-                    {{ serverStore.currentServer?.name?.charAt(0).toUpperCase() }}
-                  </span>
-                </div>
-                <label v-if="isOwner"
-                       class="absolute inset-0 bg-black/50 rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity">
-                  <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  <input type="file" accept="image/*" class="hidden" @change="handleServerAvatarUpload" />
-                </label>
-              </div>
-              <div>
-                <p class="text-white font-bold">{{ serverStore.currentServer?.name }}</p>
-                <p class="text-discord-200 text-sm">创建于 {{ serverStore.currentServer?.createdAt?.slice(0, 10) }}</p>
-              </div>
-            </div>
-
-            <div v-if="isOwner" class="space-y-3">
-              <div>
-                <label class="text-xs font-bold text-discord-200 uppercase">名称</label>
-                <input v-model="serverName" class="input-discord w-full mt-1" maxlength="50" />
-              </div>
-              <div>
-                <label class="text-xs font-bold text-discord-200 uppercase">描述</label>
-                <textarea v-model="serverDesc" class="input-discord w-full mt-1 resize-none" rows="3"
-                          maxlength="200" placeholder="介绍一下这个服务器..."></textarea>
-              </div>
-              <div class="flex items-center gap-3 flex-wrap">
-                <button @click="handleSaveServer" :disabled="saving" class="btn-primary">
-                  {{ saving ? '保存中...' : '保存修改' }}
-                </button>
-                <p v-if="saveMsg" :class="saveMsg === '保存成功' || saveMsg === '头像已更新' ? 'text-green' : 'text-red'" class="text-sm">{{ saveMsg }}</p>
-              </div>
-            </div>
-            <div v-else class="space-y-3">
-              <div>
-                <label class="text-xs font-bold text-discord-200 uppercase">描述</label>
-                <p class="text-discord-200">{{ serverStore.currentServer?.description || '无' }}</p>
-              </div>
-            </div>
-
+            <h3 class="text-lg font-bold text-white mb-4">社区资料与欢迎页</h3>
+            <CommunityProfileEditor v-if="serverStore.currentServer" :server="serverStore.currentServer" :channels="serverStore.channels" :can-manage="serverStore.canManageServer" @cropper-active="cropperActive = $event" />
             <div class="mt-8 space-y-2">
               <button v-if="isOwner" @click="handleDelete" class="btn-red">解散服务器</button>
               <button v-else @click="handleLeave" class="btn-red">退出服务器</button>
@@ -367,6 +314,11 @@ function getMemberName(member: Member) {
                             class="px-3 py-2 rounded text-xs font-bold"
                             :class="newChannelType === 'voice' ? 'bg-blurple text-white' : 'bg-discord-700 text-discord-200 hover:text-white'">
                       🔊 语音
+                    </button>
+                    <button @click="newChannelType = 'announcement'"
+                            class="px-3 py-2 rounded text-xs font-bold"
+                            :class="newChannelType === 'announcement' ? 'bg-blurple text-white' : 'bg-discord-700 text-discord-200 hover:text-white'">
+                      ◎ 公告
                     </button>
                   </div>
                   <input v-model="newChannelName" class="input-discord flex-1 min-w-[160px]" placeholder="频道名称" maxlength="30" />
@@ -406,7 +358,7 @@ function getMemberName(member: Member) {
                   <div v-for="ch in categoryChannels(cat.id)" :key="ch.id"
                        class="flex items-center justify-between bg-discord-800 rounded px-2 py-1.5">
                     <div class="flex items-center gap-1.5 flex-1 min-w-0">
-                      <span class="text-discord-200 flex-shrink-0">{{ ch.type === 'text' ? '#' : '🔊' }}</span>
+                      <span class="text-discord-200 flex-shrink-0">{{ ch.type === 'announcement' ? '◎' : ch.type === 'text' ? '#' : '🔊' }}</span>
                       <span v-if="renamingChannel !== ch.id" class="text-white text-sm truncate">{{ ch.name }}</span>
                       <input v-else v-model="renamingChannelValue" class="input-discord text-xs py-0.5 flex-1" autofocus
                              @blur="saveChannelRename(ch.id)" @keyup.enter="saveChannelRename(ch.id)" />
@@ -429,7 +381,7 @@ function getMemberName(member: Member) {
                   <div v-for="ch in categoryChannels(null)" :key="ch.id"
                        class="flex items-center justify-between bg-discord-800 rounded px-2 py-1.5">
                     <div class="flex items-center gap-1.5 flex-1 min-w-0">
-                      <span class="text-discord-200 flex-shrink-0">{{ ch.type === 'text' ? '#' : '🔊' }}</span>
+                      <span class="text-discord-200 flex-shrink-0">{{ ch.type === 'announcement' ? '◎' : ch.type === 'text' ? '#' : '🔊' }}</span>
                       <span v-if="renamingChannel !== ch.id" class="text-white text-sm truncate">{{ ch.name }}</span>
                       <input v-else v-model="renamingChannelValue" class="input-discord text-xs py-0.5 flex-1" autofocus
                              @blur="saveChannelRename(ch.id)" @keyup.enter="saveChannelRename(ch.id)" />
@@ -474,7 +426,7 @@ function getMemberName(member: Member) {
                       <input type="checkbox" :checked="val"
                              @change="editingRole.permissions[key] = !editingRole.permissions[key]"
                              class="accent-blurple" />
-                      {{ { viewChannel: '查看频道', sendMessage: '发送消息', uploadFile: '上传文件', manageChannels: '管理频道', manageRoles: '管理角色', kick: '踢人', mute: '禁言', manageServer: '管理服务器' }[key] || key }}
+                      {{ { viewChannel: '查看频道', sendMessage: '发送消息', uploadFile: '上传文件', mentionEveryone: '提及所有人', manageChannels: '管理频道', manageRoles: '管理角色', manageMessages: '管理消息与发布公告', kick: '踢人', mute: '禁言', manageServer: '管理社区资料' }[key] || key }}
                     </label>
                   </div>
                 </div>

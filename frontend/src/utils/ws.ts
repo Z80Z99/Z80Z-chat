@@ -5,19 +5,51 @@ class WSClient {
   private listeners: Map<string, WSCallback[]> = new Map()
   private reconnectTimer: any = null
   private url: string = ''
+  private active = false
+  private connectionId = 0
   private pending: { type: string; data: any }[] = []
   private sendQueue: any[] = []
   private hasConnectedBefore = false
   private reconnectCallbacks: (() => void)[] = []
+  private connectionCallbacks: ((connected: boolean) => void)[] = []
+  private connected = false
+
+  isConnected() { return this.connected }
+
+  private setConnected(connected: boolean) {
+    if (this.connected === connected) return
+    this.connected = connected
+    const connectionId = this.connectionId
+    for (const callback of [...this.connectionCallbacks]) {
+      if (connectionId !== this.connectionId || this.connected !== connected) return
+      try { callback(connected) } catch (error) { console.error('WS connection listener error:', error) }
+    }
+  }
+
+  onConnectionChange(callback: (connected: boolean) => void) {
+    if (!this.connectionCallbacks.includes(callback)) this.connectionCallbacks.push(callback)
+    callback(this.connected)
+  }
+
+  offConnectionChange(callback: (connected: boolean) => void) {
+    this.connectionCallbacks = this.connectionCallbacks.filter(item => item !== callback)
+  }
 
   connect(token: string) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.url = `${protocol}//${window.location.host}/ws?token=${token}`
+    const url = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`
+    if (!this.active || this.url !== url) {
+      this.disconnect()
+      this.url = url
+      this.active = true
+    }
     this.createConnection()
   }
 
   private createConnection() {
-    if (this.reconnectTimer) {
+    if (!this.active) return
+
+    if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
@@ -35,19 +67,34 @@ class WSClient {
       old.close()
     }
 
-    this.ws = new WebSocket(this.url)
+    const socket = new WebSocket(this.url)
+    const connectionId = ++this.connectionId
+    this.ws = socket
+    // A previous socket may already have queued an event when it is replaced.
+    const isCurrent = () => this.active && this.ws === socket && this.connectionId === connectionId
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (!isCurrent()) return
+      this.setConnected(true)
+      if (!isCurrent()) return
       if (this.hasConnectedBefore) {
-        this.reconnectCallbacks.forEach(cb => cb())
+        for (const cb of this.reconnectCallbacks) {
+          if (!isCurrent()) return
+          cb()
+        }
       }
+      if (!isCurrent()) return
       this.hasConnectedBefore = true
       const queued = this.sendQueue
       this.sendQueue = []
-      queued.forEach(d => this.send(d))
+      for (const data of queued) {
+        if (!isCurrent()) return
+        this.send(data)
+      }
     }
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (!isCurrent()) return
       try {
         const data = JSON.parse(event.data)
         const type = data.type
@@ -59,33 +106,61 @@ class WSClient {
           }
           return
         }
-        cbs.forEach(cb => cb(data))
+        for (const cb of cbs) {
+          if (!isCurrent()) return
+          cb(data)
+        }
         const allCbs = this.listeners.get('*') || []
-        allCbs.forEach(cb => cb(data))
+        for (const cb of allCbs) {
+          if (!isCurrent()) return
+          cb(data)
+        }
       } catch (e) {
         console.error('WS parse error:', e)
       }
     }
 
-    this.ws.onclose = () => {
-      this.reconnectTimer = setTimeout(() => this.createConnection(), 3000)
+    socket.onclose = () => {
+      if (!isCurrent()) return
+      this.ws = null
+      this.setConnected(false)
+      if (!this.active || this.connectionId !== connectionId || this.ws !== null) return
+      this.reconnectTimer = setTimeout(() => {
+        if (!this.active || this.connectionId !== connectionId) return
+        this.reconnectTimer = null
+        this.createConnection()
+      }, 3000)
     }
 
-    this.ws.onerror = () => {
-      this.ws?.close()
+    socket.onerror = () => {
+      if (isCurrent()) socket.close()
     }
   }
 
   disconnect() {
-    if (this.reconnectTimer) {
+    this.active = false
+    this.connectionId++
+    if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    this.ws?.close()
+    if (this.ws) {
+      this.ws.onopen = null
+      this.ws.onmessage = null
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.close()
+    }
     this.ws = null
+    this.url = ''
+    this.pending = []
+    this.sendQueue = []
+    this.hasConnectedBefore = false
+    this.setConnected(false)
   }
 
   send(data: any) {
+    if (!this.active) return
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data))
     } else {
@@ -101,7 +176,11 @@ class WSClient {
     const pendingMsgs = this.pending.filter(p => p.type === type)
     if (pendingMsgs.length > 0) {
       this.pending = this.pending.filter(p => p.type !== type)
-      pendingMsgs.forEach(p => callback(p.data))
+      const connectionId = this.connectionId
+      for (const message of pendingMsgs) {
+        if (!this.active || this.connectionId !== connectionId) return
+        callback(message.data)
+      }
     }
   }
 
@@ -114,6 +193,10 @@ class WSClient {
 
   onReconnect(callback: () => void) {
     this.reconnectCallbacks.push(callback)
+  }
+
+  offReconnect(callback: () => void) {
+    this.reconnectCallbacks = this.reconnectCallbacks.filter(cb => cb !== callback)
   }
 }
 

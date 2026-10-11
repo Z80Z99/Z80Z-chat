@@ -1,15 +1,18 @@
 # Z80Z-chat
 
-仿 Discord 风格的社区聊天系统。100% 本地运行、零外部服务依赖（无数据库、无云服务）。
+仿 Discord 风格的社区聊天系统。聊天服务与数据可在本地运行，使用 JSON 文件存储，无需外部数据库。跨网络语音和投屏可按需配置 STUN/TURN，公网访问可使用反向代理或隧道。
 
 ## 功能
 
-- 文字频道聊天：消息实时推送，支持图片 / 文件上传
-- 语音频道：WebRTC 点对点语音，麦克风 / 扬声器 / 音量设置
-- 屏幕投屏：画质可选，手机可观看，断流自动修复
-- 服务器 / 频道 / 分类管理，角色权限体系
-- 邀请链接、好友系统、移动端适配
-- 自动刷新与断线重连，语音状态自动恢复
+- 聊天：实时消息、图片和文件预览、回复、编辑、删除、按频道保存草稿；发送未确认时可沿用原提交重试，避免重复消息。
+- 阅读与找回：持久化未读、回到最新、原消息定位、六种表情回应、置顶、按正文 / 文件名 / 发送者搜索。
+- 提醒：成员提及、受权限控制的全体提及、应用内通知；每个频道可选择所有消息、仅提及或静音。
+- 社区：服务器 / 频道 / 分类与角色权限管理、邀请链接、好友；欢迎介绍、规则、推荐频道、头像和横幅裁切，以及由管理者发布的公告频道。
+- 语音：WebRTC 点对点通话、输入和输出设备选择、麦克风与扬声器测试、总音量和成员音量、开放麦克风或按键发言，手机可按住说话。
+- 投屏：画质与帧率选择、共享来源切换、指定成员画面、影院模式、暂停与全屏，以及按成员查看连接诊断。
+- 桌面与手机布局、键盘焦点、消息长按操作、减少动画偏好；自动重连与账号、房间隔离。
+
+提醒目前通过应用内面板提供。实体设备、手机软键盘、蓝牙切换和公网语音 / 投屏仍需独立验收。
 
 ## 技术栈
 
@@ -23,15 +26,17 @@
 
 ## 快速启动
 
-要求：Node.js 18+（建议 20+ / 22 LTS）
+要求：Node.js 18+，并使用随源码提供的 `package-lock.json`。
 
 ```bash
-npm install        # 安装依赖
-npm run build      # 构建前端（输出到 dist/）
-npm run start      # 构建并启动
+npm ci --include=dev     # 按锁文件安装运行与构建依赖
+npm run check:frontend   # Vue 模板 / 配置类型检查、构建及界面规则检查
+node server.js           # 使用已构建的 dist/ 启动
 ```
 
 启动后访问 `http://localhost:配置端口号`，注册账号即可创建服务器。
+
+开发时使用 `npm run dev`。`npm start` 会重新构建前端，需要保留开发依赖；仅运行已构建版本时使用 `node server.js`。
 
 ## Windows 使用方式
 
@@ -53,7 +58,11 @@ npm run start      # 构建并启动
 npm run build:single    # 生成 Z80Z-chat.bat（版本号取自 package.json）
 ```
 
-生成的 bat 可直接分发：双击首次运行完成安装（下载 Node.js → npm install → 构建），之后作为启动器使用，支持智能快速更新。
+生成的 bat 双击后选择安装目录，按需下载 Node.js，再执行 `npm ci --include=dev` 和 `npm run check:frontend`，之后作为交互式启动器使用。
+
+完整升级先在临时目录安装、检查并构建，成功后再替换代码；保留现有 `data/`、`logs/` 和 `config.json`，失败保留旧版。只有源码内容和依赖一致、且已有 `dist/` 与 `node_modules/` 时才进入快速升级，沿用这两个目录。升级前仍应备份完整数据目录。
+
+当前 v1.0.9 已完成本地构建及隔离安装、升级验收，尚未发布 GitHub Release；已有真实安装目录保持原样。具体流程见 [单文件部署说明](docs/SINGLE-FILE.md)。
 
 ## Linux 部署
 
@@ -68,10 +77,11 @@ sudo systemctl enable --now z80z-chat
 ## 测试
 
 ```bash
-npm test           # 81 个用例，node:test 零依赖
+npm test                 # node:test 回归测试
+npm run check:frontend   # 完整前端验收
 ```
 
-测试完全隔离（随机端口 + 临时数据目录），不会触碰真实数据。架构与覆盖范围见 `docs/TESTING.md`。
+测试使用随机端口与临时目录隔离运行数据，当前完整回归使用 Node.js 24；安装器事务回归仅在 Windows PowerShell 执行。前端类型回归使用项目安装的 Vue 检查工具。架构与覆盖范围见 [测试说明](docs/TESTING.md)。
 
 ## 备份与恢复
 
@@ -87,6 +97,7 @@ node scripts/restore.js     # 交互式恢复（恢复前自动保全当前数�
 ```
 z80z-chat/
 ├── start.bat / start.js    # Windows 交互式管理
+├── package-lock.json      # 安装与构建依赖锁文件
 ├── server.js               # Express 服务入口
 ├── config.json             # 部署配置（含中文注释）
 ├── config/index.js         # 配置加载（支持 PORT/HOST/DATA_DIR 环境变量）
@@ -97,7 +108,7 @@ z80z-chat/
 ├── scripts/                # backup.js / restore.js
 ├── deploy/                 # systemd 服务模板
 ├── docs/                   # 部署 / 备份 / 测试 / 故障排查文档
-├── test/                   # 自动化测试（81 例）
+├── test/                   # 自动化回归测试
 └── frontend/               # Vue 3 前端
 ```
 

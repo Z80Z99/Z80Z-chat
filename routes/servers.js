@@ -2,23 +2,29 @@ import { Router } from 'express'
 import { authMiddleware } from '../middlewares/auth.js'
 import { genId, now } from '../utils/helpers.js'
 import { pushToUser, pushToAll } from '../websocket/push.js'
-import { collectServerFiles, cleanupAttachmentFiles } from '../utils/files.js'
+import { collectServerFiles, cleanupAttachmentFiles, extractFileNames } from '../utils/files.js'
+import { hasPermission } from '../utils/permissions.js'
+import { serverProfile, validateServerProfile, pushServerProfile } from '../utils/server-profile.js'
+import { logger } from '../utils/logger.js'
 
 const router = Router()
 
 router.post('/create', authMiddleware, (req, res) => {
   const db = req.app.locals.db
-  const { name, description, avatar } = req.body
-  if (!name || name.length < 1 || name.length > 50) {
-    return res.status(400).json({ error: '服务器名称1-50个字符' })
-  }
-
   const serverId = genId()
+  let fields
+  try {
+    fields = validateServerProfile(db, { id: serverId, ownerId: req.user.id }, req.body)
+    if (!fields.name) throw new Error('服务器名称1-50个字符')
+  } catch (error) { return res.status(400).json({ error: error.message }) }
   const server = {
     id: serverId,
-    name,
-    avatar: avatar || 'default',
-    description: description || '',
+    name: fields.name,
+    avatar: fields.avatar || 'default',
+    description: fields.description || '',
+    banner: fields.banner || '',
+    welcome: fields.welcome || { title: '', message: '', rules: '', recommendedChannelIds: [] },
+    profileRevision: 0,
     ownerId: req.user.id,
     createdAt: now()
   }
@@ -86,7 +92,7 @@ router.post('/create', authMiddleware, (req, res) => {
   }
   db.createChannel(voiceChannel)
 
-  res.json({ server })
+  res.json({ server: serverProfile(db, server, req.user.id) })
 })
 
 router.get('/list', authMiddleware, (req, res) => {
@@ -94,7 +100,7 @@ router.get('/list', authMiddleware, (req, res) => {
   const memberships = db.findMembersByUser(req.user.id)
   const serverIds = memberships.map(m => m.serverId)
   const servers = db.findAllServers().filter(s => serverIds.includes(s.id))
-  res.json({ servers })
+  res.json({ servers: servers.map(server => serverProfile(db, server, req.user.id)) })
 })
 
 router.get('/:id', authMiddleware, (req, res) => {
@@ -105,7 +111,7 @@ router.get('/:id', authMiddleware, (req, res) => {
   if (!member) return res.status(403).json({ error: '你不是该服务器成员' })
 
   const categories = db.findCategoriesByServer(req.params.id)
-  const channels = db.findChannelsByServer(req.params.id)
+  const channels = db.findChannelsByServer(req.params.id).filter(() => hasPermission(db, req.user.id, req.params.id, 'viewChannel'))
   const roles = db.findRolesByServer(req.params.id)
   const members = db.findMembersByServer(req.params.id)
   // 批量解析用户（N+1 优化）
@@ -115,26 +121,38 @@ router.get('/:id', authMiddleware, (req, res) => {
     return { ...m, user: user ? { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, status: user.status } : null }
   })
 
-  res.json({ server, categories, channels, roles, members: fullMembers })
+  res.json({ server: serverProfile(db, server, req.user.id), categories, channels, roles, members: fullMembers })
 })
 
 router.put('/:id', authMiddleware, (req, res) => {
   const db = req.app.locals.db
   const server = db.findServer(req.params.id)
   if (!server) return res.status(404).json({ error: '服务器不存在' })
-  if (server.ownerId !== req.user.id) return res.status(403).json({ error: '只有群主可修改' })
-
-  const { name, description, avatar } = req.body
-  const updates = {}
-  if (name !== undefined) {
-    if (name.length < 1 || name.length > 50) return res.status(400).json({ error: '服务器名称1-50个字符' })
-    updates.name = name
+  if (server.ownerId !== req.user.id && (!db.findMember(server.id, req.user.id) || !hasPermission(db, req.user.id, server.id, 'manageServer'))) return res.status(403).json({ error: '没有管理社区的权限' })
+  const revision = serverProfile(db, server, req.user.id).profileRevision
+  if (req.body?.expectedRevision !== undefined) {
+    if (!Number.isSafeInteger(req.body.expectedRevision) || req.body.expectedRevision < 0) return res.status(400).json({ error: '社区资料版本格式无效' })
+    if (req.body.expectedRevision !== revision) return res.status(409).json({ error: '社区资料已更新，请重新加载后再保存' })
   }
-  if (description !== undefined) updates.description = description
-  if (avatar !== undefined) updates.avatar = avatar
-
-  const updated = db.updateServer(req.params.id, updates)
-  res.json({ server: updated })
+  let updates
+  try { updates = validateServerProfile(db, server, req.body) }
+  catch (error) { return res.status(400).json({ error: error.message }) }
+  if (Object.keys(updates).length === 0) return res.json({ server: serverProfile(db, server, req.user.id) })
+  if (revision >= Number.MAX_SAFE_INTEGER) return res.status(409).json({ error: '社区资料版本已超出可用范围' })
+  const previous = { ...server }
+  const oldFiles = extractFileNames({ image: server.avatar, file: server.banner })
+  try {
+    db.updateServer(server.id, { ...updates, profileRevision: revision + 1 })
+    db.save()
+  } catch (error) {
+    for (const key of Object.keys(server)) delete server[key]
+    Object.assign(server, previous)
+    logger.error('社区资料保存失败，已恢复原资料: ' + (error?.message || error))
+    return res.status(500).json({ error: '社区资料保存失败，请重试' })
+  }
+  pushServerProfile(db, req.app.locals.wss, server)
+  cleanupAttachmentFiles(db, oldFiles)
+  res.json({ server: serverProfile(db, server, req.user.id) })
 })
 
 router.post('/transfer/:id', authMiddleware, (req, res) => {

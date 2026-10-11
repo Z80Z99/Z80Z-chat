@@ -20,7 +20,7 @@ test('正常保存：注册后 db.json 可解析且数据完整', async () => {
   assert.ok(!fs.existsSync(tmpPath()))
 })
 
-test('写入失败时旧 db.json 保持有效（防抖异步写，接口不受影响）', async () => {
+test('写入失败保留旧数据，解除故障后无需新写操作即可自动落盘', async () => {
   const rawBefore = fs.readFileSync(dbPath(), 'utf8')
 
   // 把 tmp 路径占为目录 → 下次防抖落盘失败
@@ -34,11 +34,12 @@ test('写入失败时旧 db.json 保持有效（防抖异步写，接口不受�
   const ping = await fetch(`http://localhost:${TEST_PORT}/api/version`)
   assert.equal(ping.status, 200, '写失败后服务仍应存活')
 
-  // 清理占位目录后恢复可用（失败的写入保留在内存，恢复时一并落盘）
+  // 仅清理占位目录，不发送任何新的写请求；后台重试必须保存待写数据。
   fs.rmdirSync(tmpPath())
-  await register('atomic_recover')
-  const dbAfter = await waitForDB(d => d.users.some(u => u.username === 'atomic_recover'))
+  const dbAfter = await waitForDB(d => d.users.some(u => u.username === 'atomic_fail'))
   assert.ok(dbAfter.users.some(u => u.username === 'atomic_user1'))
+  assert.equal(dbAfter.users.filter(u => u.username === 'atomic_fail').length, 1)
+  assert.ok(!fs.existsSync(tmpPath()))
 })
 
 test('启动时清理残留 tmp 文件', async () => {

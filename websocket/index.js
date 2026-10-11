@@ -1,6 +1,7 @@
 import { isSessionExpired } from '../middlewares/auth.js'
-import { validateMessageSend, validateMessagePayload, validateMentionEveryone, buildMessage, saveAndBroadcastMessage } from '../utils/message.js'
+import { submitMessage } from '../utils/message.js'
 import { hasPermission } from '../utils/permissions.js'
+import { signUploadUrlsDeep } from '../utils/uploadSign.js'
 
 const voiceRooms = new Map()
 
@@ -31,6 +32,7 @@ export function handleWebSocket(wss, db) {
     }
 
     ws.userId = user.id
+    ws.sessionToken = token
     ws.username = user.username
     ws.voiceRoomId = null
 
@@ -51,6 +53,7 @@ export function handleWebSocket(wss, db) {
       } catch {
         return
       }
+      if (!data || typeof data !== 'object') return
 
       switch (data.type) {
 
@@ -91,27 +94,21 @@ export function handleWebSocket(wss, db) {
         }
 
         case 'message': {
-          const channel = db.findChannel(data.channelId)
-          const check = validateMessageSend(db, user.id, channel)
-          if (!check.ok) break
-          const payloadCheck = validateMessagePayload(data)
-          if (!payloadCheck.ok) break
-          const mentionCheck = validateMentionEveryone(db, user.id, channel, !!data.mentionEveryone)
-          if (!mentionCheck.ok) break
-
-          const message = buildMessage({
-            channelId: data.channelId,
-            userId: user.id,
-            content: data.content,
-            image: data.image,
-            file: data.file,
-            fileName: data.fileName,
-            replyTo: data.replyTo,
-            mentions: data.mentions,
-            mentionEveryone: data.mentionEveryone
-          })
-
-          saveAndBroadcastMessage(db, wss, message, user)
+          const currentSession = db.findSession(token)
+          if (!currentSession || isSessionExpired(currentSession) || !db.findUser(user.id)) {
+            if (data.clientMessageId !== undefined && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'message-error', clientMessageId: data.clientMessageId, status: 401, error: '登录已过期' }))
+            }
+            ws.close(4001, '无效的token')
+            break
+          }
+          const result = submitMessage(db, wss, user, data)
+          if (data.clientMessageId !== undefined && ws.readyState === 1) {
+            const response = result.ok
+              ? { type: 'message-ack', clientMessageId: data.clientMessageId, status: 200, message: result.message }
+              : { type: 'message-error', clientMessageId: data.clientMessageId, status: result.status, error: result.error }
+            ws.send(JSON.stringify(signUploadUrlsDeep(response)))
+          }
           break
         }
 

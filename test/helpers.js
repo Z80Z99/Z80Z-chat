@@ -10,8 +10,9 @@ export const PROJECT_ROOT = path.join(__dirname, '..')
 // 测试数据根目录：移入项目内（避免系统 Temp 活动，降低杀软启发式误报概率）
 const TEST_DATA_ROOT = path.join(PROJECT_ROOT, '.test-data')
 
-// 每个测试文件随机独立端口（3100~3899），支持并行执行
-export const TEST_PORT = 3100 + Math.floor(Math.random() * 800)
+// 每个测试文件随机独立端口（3100~3899），避开 fetch 禁止访问的 3659。
+const candidatePort = 3100 + Math.floor(Math.random() * 800)
+export const TEST_PORT = candidatePort === 3659 ? 3660 : candidatePort
 
 let proc = null
 let tmpDataDir = null
@@ -31,8 +32,9 @@ export async function startServer() {
   logs = ''
   proc = spawn(process.execPath, ['server.js'], {
     cwd: PROJECT_ROOT,
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(TEST_PORT), DATA_DIR: tmpDataDir }
+    env: { ...process.env, PORT: String(TEST_PORT), DATA_DIR: tmpDataDir, LOG_DIR: path.join(tmpDataDir, 'logs') }
   })
   proc.stdout.on('data', d => { logs += d.toString() })
   proc.stderr.on('data', d => { logs += d.toString() })

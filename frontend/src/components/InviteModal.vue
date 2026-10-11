@@ -80,6 +80,10 @@ function copyCode(code: string) {
   setTimeout(() => { copied.value = false }, 2000)
 }
 
+function selectInviteLink(event: FocusEvent) {
+  if (event.currentTarget instanceof HTMLInputElement) event.currentTarget.select()
+}
+
 async function deleteInvite(id: string) {
   try {
     await api.deleteInvite(id)
@@ -140,7 +144,7 @@ async function deleteInvite(id: string) {
       <div v-if="newInviteCode" class="bg-green/10 border border-green/30 rounded-lg p-3 mb-4">
         <p class="text-sm text-green mb-2">邀请链接已生成！</p>
         <div class="flex gap-2">
-          <input :value="newInviteCode" class="input-discord flex-1 text-sm" readonly @focus="$event.target.select()" />
+          <input :value="newInviteCode" class="input-discord flex-1 text-sm" readonly @focus="selectInviteLink" />
           <button @click="copyCode(newInviteCode.split('/').pop()!)" class="btn-green text-xs whitespace-nowrap">
             {{ copied ? '已复制' : '复制' }}
           </button>

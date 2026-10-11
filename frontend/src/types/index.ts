@@ -8,6 +8,13 @@ export interface User {
   createdAt: string
 }
 
+export interface ServerWelcome {
+  title: string
+  message: string
+  rules: string
+  recommendedChannelIds: string[]
+}
+
 export interface Server {
   id: string
   name: string
@@ -15,6 +22,9 @@ export interface Server {
   description: string
   ownerId: string
   createdAt: string
+  banner?: string
+  welcome?: ServerWelcome
+  profileRevision?: number
 }
 
 export interface Category {
@@ -29,13 +39,17 @@ export interface Channel {
   serverId: string
   categoryId: string | null
   name: string
-  type: 'text' | 'voice'
+  type: 'text' | 'voice' | 'announcement'
+  revision?: number
   position: number
   permissions: Record<string, any>
 }
 
 export interface Message {
   id: string
+  revision?: number
+  sequence: number
+  clientMessageId?: string | null
   channelId: string
   userId: string
   content: string
@@ -47,7 +61,27 @@ export interface Message {
   replyTo: string | null
   mentions: string[]
   mentionEveryone: boolean
+  mentionUsers?: Pick<User, 'id' | 'username' | 'nickname' | 'avatar'>[]
+  reactions?: { emoji: string; userIds: string[]; users?: Pick<User, 'id' | 'username' | 'nickname' | 'avatar'>[] }[]
+  pin?: { userId: string; createdAt: string; user?: Pick<User, 'id' | 'username' | 'nickname' | 'avatar'> | null } | null
   user?: User
+}
+
+export interface ChannelReadState {
+  channelId: string
+  readSequence: number
+  latestSequence: number
+  unreadCount: number
+  mentionCount?: number
+  revision: number
+}
+
+export type NotificationMode = 'all' | 'mentions' | 'mute'
+export interface MessageNotification {
+  serverId: string
+  channelId: string
+  message: Message
+  reason: 'mention' | 'everyone' | 'message'
 }
 
 export interface Role {

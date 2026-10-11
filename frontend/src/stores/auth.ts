@@ -9,13 +9,17 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref(false)
 
   async function fetchMe() {
+    const token = localStorage.getItem('token')
     try {
       const data = await api.me()
+      if (localStorage.getItem('token') !== token) return null
       user.value = data.user
       return data.user
     } catch {
-      user.value = null
-      localStorage.removeItem('token')
+      if (localStorage.getItem('token') === token) {
+        user.value = null
+        localStorage.removeItem('token')
+      }
       throw new Error('登录已过期')
     }
   }

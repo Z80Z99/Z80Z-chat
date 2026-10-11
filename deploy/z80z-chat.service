@@ -3,10 +3,14 @@
 #
 # 安装步骤（以 /opt/z80z-chat 为例）：
 #   1. 部署代码：sudo mkdir -p /opt/z80z-chat && sudo cp -r . /opt/z80z-chat
-#   2. 安装依赖并构建前端：
-#        cd /opt/z80z-chat && npm install --omit=dev && npm run build
-#   3. 创建独立运行用户（无登录权限）：
+#   2. 创建独立运行用户（无登录权限），并授予项目目录所有权：
 #        sudo useradd --system --home /opt/z80z-chat --shell /usr/sbin/nologin z80z-chat
+#        sudo chown -R z80z-chat:z80z-chat /opt/z80z-chat
+#   3. 安装依赖、检查类型并构建前端（源码须含 package-lock.json）：
+#        cd /opt/z80z-chat
+#        sudo -u z80z-chat npm ci --include=dev
+#        sudo -u z80z-chat npm run check:frontend
+#        可选：sudo -u z80z-chat npm prune --omit=dev
 #   4. 数据目录权限（UMask 仅影响新建文件，已存在的目录需手动设置）：
 #        sudo mkdir -p /opt/z80z-chat/data /opt/z80z-chat/logs
 #        sudo chown -R z80z-chat:z80z-chat /opt/z80z-chat/data /opt/z80z-chat/logs
@@ -28,7 +32,7 @@ After=network.target
 [Service]
 Type=simple
 
-# 独立低权限用户运行（需按上方步骤 3 预先创建）
+# 独立低权限用户运行（需按上方步骤 2 预先创建）
 User=z80z-chat
 Group=z80z-chat
 

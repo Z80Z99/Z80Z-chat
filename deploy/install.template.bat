@@ -836,7 +836,7 @@ function Expand-Zip([string]$zip, [string]$dest) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
     [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $dest)
   } catch {
-    Expand-Archive -Path $zip -DestinationPath $dest -Force
+    Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force -ErrorAction Stop
   }
 }
 
@@ -1128,10 +1128,38 @@ function Get-PortFromConfig($projDir) {
   } catch { return $null }
 }
 
+function Get-ProjectConfiguredDataDirectory([string]$projDir) {
+  $dataName = 'data'
+  $configPath = Join-Path $projDir 'config.json'
+  if (Test-Path -LiteralPath $configPath) {
+    $parsed = ConvertFrom-JsonCompat (Strip-Comments ([System.IO.File]::ReadAllText($configPath, [System.Text.Encoding]::UTF8)))
+    $configured = Get-JsonValue $parsed 'dataDir'
+    if ($configured -is [string] -and $configured.Trim() -ne '') { $dataName = $configured }
+  }
+  return $dataName
+}
+
+function Get-ProjectDataDirectory([string]$projDir) {
+  $dataName = Get-ProjectConfiguredDataDirectory $projDir
+  if ($env:DATA_DIR) { $dataName = $env:DATA_DIR }
+  if ([System.IO.Path]::IsPathRooted($dataName)) { return [System.IO.Path]::GetFullPath($dataName) }
+  return [System.IO.Path]::GetFullPath((Join-Path $projDir $dataName))
+}
+
+function Test-ProjectHasAbsoluteRuntimePath([string]$projDir) {
+  $projectFull = [System.IO.Path]::GetFullPath($projDir).TrimEnd('\', '/')
+  foreach ($runtimePath in @((Get-ProjectConfiguredDataDirectory $projDir), $env:DATA_DIR, $env:LOG_DIR)) {
+    if (-not $runtimePath -or -not [System.IO.Path]::IsPathRooted($runtimePath)) { continue }
+    $runtimeFull = [System.IO.Path]::GetFullPath($runtimePath).TrimEnd('\', '/')
+    if ($runtimeFull.Equals($projectFull, [System.StringComparison]::OrdinalIgnoreCase) -or $runtimeFull.StartsWith($projectFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+  }
+  return $false
+}
+
 function Stop-Service($projDir) {
   Ln '  停止服务中...'
   $stopped = $false
-  $pidFile = Join-Path $projDir 'data\server.pid'
+  $pidFile = Join-Path (Get-ProjectDataDirectory $projDir) 'server.pid'
   if (Test-Path $pidFile) {
     try {
       $p = ([System.IO.File]::ReadAllText($pidFile, [System.Text.Encoding]::UTF8)).Trim()
@@ -1148,8 +1176,8 @@ function Stop-Service($projDir) {
       $out = (& netstat -ano -p tcp 2>$null) -match 'LISTENING' -match (':' + $port + ' ')
       foreach ($line in $out) {
         if ($line -match '(\d+)\s*$') {
-          $pid = [int]$Matches[1]
-          if ($pid -gt 0) { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue; $stopped = $true }
+          $servicePid = [int]$Matches[1]
+          if ($servicePid -gt 0) { Stop-Process -Id $servicePid -Force -ErrorAction SilentlyContinue; $stopped = $true }
         }
       }
     } catch {}
@@ -1213,7 +1241,7 @@ function Ask-Port($projDir) {
 
 # ---------- backup data to data-backup\backup-<stamp> (keep backupKeep) ----------
 function Backup-Data($projDir, $cfg) {
-  $data = Join-Path $projDir 'data'
+  $data = Get-ProjectDataDirectory $projDir
   if (-not (Test-Path $data)) {
     Info '无 data 目录，跳过备份'
     return
@@ -1221,55 +1249,138 @@ function Backup-Data($projDir, $cfg) {
   $stamp = Get-Date -Format 'yyyyMMdd-HHmmssfff'
   $dest = Join-Path $BackupRoot ('backup-' + $stamp)
   New-Item -ItemType Directory -Path $dest -Force | Out-Null
-  Get-ChildItem $data | Copy-Item -Destination $dest -Recurse -Force
+  Get-ChildItem -LiteralPath $data -Force -ErrorAction Stop | Copy-Item -Destination $dest -Recurse -Force -ErrorAction Stop
   Ok ('已备份数据 → ' + $dest)
   $keep = 3
   try { $keep = [int]$cfg['backupKeep'] } catch {}
   if ($keep -lt 1) { $keep = 1 }
-  $all = Get-ChildItem $BackupRoot | Where-Object { $_.PSIsContainer } | Sort-Object Name
+  $all = @(Get-ChildItem -LiteralPath $BackupRoot | Where-Object { $_.PSIsContainer -and $_.Name -match '^backup-\d{8}-\d{9}$' } | Sort-Object Name)
   $excess = $all.Count - $keep
   if ($excess -gt 0) {
     $all | Select-Object -First $excess | ForEach-Object {
-      Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+      $backupPath = [System.IO.Path]::GetFullPath($_.FullName)
+      if ([System.IO.Path]::GetDirectoryName($backupPath) -ne [System.IO.Path]::GetFullPath($BackupRoot)) { throw '备份清理路径不在备份目录内' }
+      Remove-Item -LiteralPath $backupPath -Recurse -Force -ErrorAction Stop
     }
     Hint ('已清理旧备份 ' + $excess + ' 份（保留 ' + $keep + ' 份，可在 config.json 修改）')
   }
 }
 
-# ---------- rebuild project (keep data / logs / node_modules / config.json) ----------
-function Rebuild-Project($projDir) {
-  Progress '重建项目文件（保留 data / logs / node_modules / config.json）...'
-  $keepNames = @('data', 'logs', 'node_modules', 'config.json', 'assets')
-  Get-ChildItem $projDir -Force | Where-Object { $keepNames -notcontains $_.Name } | ForEach-Object {
-    Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+# ---------- release project files (extract start.js + restore zip) ----------
+function Write-Project($projDir, [bool]$keepConfig = $false) {
+  $tmp = Join-Path $Root ('.project-files-' + [System.Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $tmp -ErrorAction Stop | Out-Null
+  try {
+    $jsB64 = Extract-Block '__NODECHAT_STARTJS_B64_BEGIN__' '__NODECHAT_STARTJS_B64_END__'
+    $jsBytes = [System.Convert]::FromBase64String(($jsB64 -join ''))
+    $b64 = Extract-Block '__NODECHAT_ZIP_B64_BEGIN__' '__NODECHAT_ZIP_B64_END__'
+    $zip = Join-Path $tmp 'project.zip'
+    [System.IO.File]::WriteAllBytes($zip, [System.Convert]::FromBase64String(($b64 -join '')))
+    $unpacked = Join-Path $tmp 'files'
+    New-Item -ItemType Directory -Path $unpacked -ErrorAction Stop | Out-Null
+    Expand-Zip $zip $unpacked
+    if ($PayloadSha -ne '' -and (Compute-PayloadSha $unpacked) -ne $PayloadSha) { throw '安装包内容指纹不一致，已保留原项目' }
+    $packedStart = Join-Path $unpacked 'start.js'
+    if ((Test-Path -LiteralPath $packedStart) -and [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($packedStart)) -ne [System.Convert]::ToBase64String($jsBytes)) {
+      throw '启动器与安装包内容不一致，已保留原项目'
+    }
+    [System.IO.File]::WriteAllBytes($packedStart, $jsBytes)
+    New-Item -ItemType Directory -Path $projDir -Force -ErrorAction Stop | Out-Null
+    foreach ($entry in (Get-ChildItem -LiteralPath $unpacked -Force -ErrorAction Stop)) {
+      if ($keepConfig -and $entry.Name -eq 'config.json' -and (Test-Path -LiteralPath (Join-Path $projDir 'config.json'))) { continue }
+      Copy-Item -LiteralPath $entry.FullName -Destination $projDir -Recurse -Force -ErrorAction Stop
+    }
+  } finally {
+    Remove-InstallerWorkDirectory $tmp '.project-files-'
   }
 }
 
-# ---------- release project files (extract start.js + restore zip) ----------
-function Write-Project($projDir, [bool]$keepConfig = $false) {
-  $cfgPath = Join-Path $projDir 'config.json'
-  $holdCfg = ''
-  # 更新场景：解压前移走用户版 config.json，解压后移回（zip 默认版会被覆盖丢弃）
-  if ($keepConfig -and (Test-Path $cfgPath)) {
-    $holdCfg = Join-Path $projDir ('.config.' + [System.Guid]::NewGuid().ToString('N'))
-    Move-Item $cfgPath $holdCfg -Force
+function Remove-InstallerWorkDirectory([string]$dir, [string]$prefix) {
+  $full = [System.IO.Path]::GetFullPath($dir)
+  $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+  if ([System.IO.Path]::GetDirectoryName($full) -ne $rootFull -or -not ([System.IO.Path]::GetFileName($full).StartsWith($prefix))) { throw '安装临时目录不在指定根目录内' }
+  if (Test-Path -LiteralPath $full) { Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop }
+}
+
+# 新文件准备成功前不改旧项目；替换失败时恢复旧代码、依赖、构建和版本标记。
+function Invoke-ProjectUpdate([string]$projDir, $cfg, [bool]$fast, [string]$payloadHash) {
+  $projectFull = [System.IO.Path]::GetFullPath($projDir).TrimEnd('\', '/')
+  $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+  if ([System.IO.Path]::GetDirectoryName($projectFull) -ne $rootFull) { throw '更新目标必须是安装根目录内的项目目录' }
+  if (((Get-Item -LiteralPath $projectFull -ErrorAction Stop).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw '不能更新链接项目目录' }
+  $stage = Join-Path $rootFull ('.update-stage-' + [System.Guid]::NewGuid().ToString('N'))
+  $rollback = Join-Path $rootFull ('.project-rollback-' + [System.Guid]::NewGuid().ToString('N'))
+  $keepNames = @('data', 'logs', 'config.json')
+  $logDir = $env:LOG_DIR
+  if ($logDir -and -not [System.IO.Path]::IsPathRooted($logDir)) { $logDir = Join-Path $projectFull $logDir }
+  foreach ($runtimeDir in @((Get-ProjectDataDirectory $projectFull), $logDir)) {
+    if (-not $runtimeDir) { continue }
+    $runtimeFull = [System.IO.Path]::GetFullPath($runtimeDir).TrimEnd('\', '/')
+    if ($runtimeFull -eq $projectFull) { throw '运行数据目录不能与项目目录重合' }
+    if ($runtimeFull.StartsWith($projectFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+      $keepNames += ($runtimeFull.Substring($projectFull.Length + 1).Split('\')[0])
+    }
   }
-  # start.js 以 base64 内嵌（与 PS/zip 块一致，避免 bat 明文含可被安全软件
-  # 静态特征扫描命中的代码），解码后写入项目目录
-  $jsB64 = Extract-Block '__NODECHAT_STARTJS_B64_BEGIN__' '__NODECHAT_STARTJS_B64_END__'
-  [System.IO.File]::WriteAllBytes((Join-Path $projDir 'start.js'), [System.Convert]::FromBase64String(($jsB64 -join '')))
-  $b64 = Extract-Block '__NODECHAT_ZIP_B64_BEGIN__' '__NODECHAT_ZIP_B64_END__'
-  $bytes = [System.Convert]::FromBase64String(($b64 -join ''))
-  $zip = Join-Path $projDir '.project.zip'
-  [System.IO.File]::WriteAllBytes($zip, $bytes)
+  if ($fast) { $keepNames += @('node_modules', 'dist') }
+  $movedOld = @()
+  $movedNew = @()
+  $committed = $false
+  $preserveRollback = $false
+  New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
   try {
-    Expand-Zip $zip $projDir
+    # 保留未随源码分发的自定义 assets，新版源码资源再覆盖同名文件。
+    $oldAssets = Join-Path $projectFull 'assets'
+    if (Test-Path -LiteralPath $oldAssets) { Copy-Item -LiteralPath $oldAssets -Destination $stage -Recurse -Force -ErrorAction Stop }
+    Write-Project $stage
+    $currentConfig = Join-Path $projectFull 'config.json'
+    if (Test-Path -LiteralPath $currentConfig) { Copy-Item -LiteralPath $currentConfig -Destination (Join-Path $stage 'config.json') -Force -ErrorAction Stop }
+    foreach ($entry in (Get-ChildItem -LiteralPath $stage -Force -ErrorAction Stop)) {
+      if ($keepNames -contains $entry.Name -and $entry.Name -ne 'config.json') { throw ('运行数据目录与发布文件重合：' + $entry.Name) }
+    }
+    if (-not $fast) {
+      Invoke-NpmInstall $stage $cfg
+      Invoke-NpmBuild $stage
+    } elseif (-not (Test-Path -LiteralPath (Join-Path $projectFull 'dist\index.html')) -or -not (Test-Path -LiteralPath (Join-Path $projectFull 'node_modules\.bin\vite.cmd'))) {
+      throw '快速更新缺少依赖或构建产物，请执行完整更新'
+    }
+    Write-VersionMarker $stage $payloadHash
+    Stop-Service $projectFull
+    if (-not $fast) { Backup-Data $projectFull $cfg }
+    New-Item -ItemType Directory -Path $rollback -ErrorAction Stop | Out-Null
+    try {
+      foreach ($entry in (Get-ChildItem -LiteralPath $projectFull -Force -ErrorAction Stop)) {
+        if ($keepNames -contains $entry.Name) { continue }
+        Move-Item -LiteralPath $entry.FullName -Destination $rollback -ErrorAction Stop
+        $movedOld += $entry.Name
+      }
+      foreach ($entry in (Get-ChildItem -LiteralPath $stage -Force -ErrorAction Stop)) {
+        if ($keepNames -contains $entry.Name) { continue }
+        Move-Item -LiteralPath $entry.FullName -Destination $projectFull -ErrorAction Stop
+        $movedNew += $entry.Name
+      }
+      $committed = $true
+    } catch {
+      $updateError = $_
+      try {
+        foreach ($name in $movedNew) {
+          $newPath = [System.IO.Path]::GetFullPath((Join-Path $projectFull $name))
+          if ([System.IO.Path]::GetDirectoryName($newPath) -ne $projectFull) { throw '回退目标不在项目目录内' }
+          Remove-Item -LiteralPath $newPath -Recurse -Force -ErrorAction Stop
+        }
+        foreach ($name in $movedOld) { Move-Item -LiteralPath (Join-Path $rollback $name) -Destination $projectFull -ErrorAction Stop }
+      } catch {
+        $preserveRollback = $true
+        throw ('更新失败且自动恢复未完成，旧文件保留于 ' + $rollback + '：' + $_.Exception.Message)
+      }
+      throw $updateError
+    }
   } finally {
-    Remove-Item $zip -Force -ErrorAction SilentlyContinue
+    try { Remove-InstallerWorkDirectory $stage '.update-stage-' } catch { Warn ('安装临时目录清理失败：' + $stage) }
+    if (-not $preserveRollback) {
+      try { Remove-InstallerWorkDirectory $rollback '.project-rollback-' } catch { Warn ('旧文件临时目录保留于：' + $rollback) }
+    }
   }
-  if ($holdCfg -ne '') {
-    Move-Item $holdCfg $cfgPath -Force
-  }
+  if ($committed) { Ok '新版本文件已安装，配置与运行数据已保留' }
 }
 
 # ---------- npm install / build (system node or bundled nodejs) ----------
@@ -1295,16 +1406,16 @@ function Invoke-NpmInstall($projDir, $cfg) {
     for ($attempt = 1; $attempt -le 2; $attempt++) {
       Push-Location $projDir
       try {
-        Progress ('安装依赖（npm install，源 ' + $regName + '，第 ' + $attempt + ' 次，可能需要几分钟）...')
+        Progress ('安装依赖（npm ci --include=dev，源 ' + $regName + '，第 ' + $attempt + ' 次，可能需要几分钟）...')
         $outFile = Join-Path $Root ('.npm-out-' + $regName + '-' + $attempt + '.txt')
         if ($script:useSystemNode) {
-          cmd /c ('npm install --registry=' + $registry) > $outFile 2>&1
+          & npm.cmd ci --include=dev ('--registry=' + $registry) > $outFile 2>&1
         } else {
           $npm = Join-Path $NodeDir 'npm.cmd'
           if (Test-Path $npm) {
-            cmd /c ('"' + $npm + '" install --registry=' + $registry) > $outFile 2>&1
+            & $npm ci --include=dev ('--registry=' + $registry) > $outFile 2>&1
           } else {
-            & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') install '--registry=' + $registry > $outFile 2>&1
+            & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') ci --include=dev ('--registry=' + $registry) > $outFile 2>&1
           }
         }
         $code = $LASTEXITCODE
@@ -1330,7 +1441,7 @@ function Invoke-NpmInstall($projDir, $cfg) {
   $tail = ($lastOut -split "`r?`n") | Select-Object -Last 15
   $detail = $tail -join "`n"
   try { [System.IO.File]::WriteAllText($npmLog, $lastOut) } catch {}
-  throw ('npm install 失败（已尝试全部镜像源，最后使用 ' + $lastReg + '）' + [Environment]::NewLine + $detail + [Environment]::NewLine + '完整日志：' + $npmLog)
+  throw ('npm ci 失败（已尝试全部镜像源，最后使用 ' + $lastReg + '）' + [Environment]::NewLine + $detail + [Environment]::NewLine + '完整日志：' + $npmLog)
 }
 
 function Invoke-NpmBuild($projDir) {
@@ -1340,15 +1451,15 @@ function Invoke-NpmBuild($projDir) {
   }
   Push-Location $projDir
   try {
-    Progress '构建前端（npm run build）...'
+    Progress '检查并构建前端（npm run check:frontend）...'
     if ($script:useSystemNode) {
-      cmd /c 'npm run build'
+      & npm.cmd run check:frontend
     } else {
       $npm = Join-Path $NodeDir 'npm.cmd'
       if (Test-Path $npm) {
-        cmd /c ('"' + $npm + '" run build')
+        & $npm run check:frontend
       } else {
-        & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') run build
+        & $NodeExe (Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js') run check:frontend
       }
     }
     if ($LASTEXITCODE -ne 0) { throw '前端构建失败（退出码 ' + $LASTEXITCODE + '）' }
@@ -1491,7 +1602,7 @@ function Install($cfg) {
   }
 
   # npm 镜像源独立选择（与 Node.js 线路选择对称，测速 npm registry）
-  $npmLine = Choose-Line ('Z80Z-chat 项目依赖包（npm install，约 90MB）') 'npm'
+  $npmLine = Choose-Line ('Z80Z-chat 项目依赖包（按锁文件安装）') 'npm'
   if ($null -eq $npmLine) { return $false }
   $cfg['npmRegistry'] = $npmLine['npm']
 
@@ -1509,7 +1620,7 @@ function Install($cfg) {
   Invoke-NpmInstall $projDir $cfg
   Ln ''
   Invoke-NpmBuild $projDir
-  Write-VersionMarker $projDir
+  Write-VersionMarker $projDir $PayloadSha
   Remove-Item $ConfigFile -Force -ErrorAction SilentlyContinue
   $null = Set-BatPreferenceSafe 'LAST_PROJECT' $pn
   Ln ''
@@ -1539,12 +1650,15 @@ function Finish-Update($projDir) {
     $newName = $Matches[1] + '-' + $AppVersion
   }
   if ($newName -ne '' -and $newName -ne $oldName) {
-    if (Test-Path (Join-Path $Root $newName)) {
+    if (Test-ProjectHasAbsoluteRuntimePath $projDir) {
+      Ln ''
+      Warn ('项目内部使用绝对数据或日志路径，保持原文件夹名：' + $oldName)
+    } elseif (Test-Path (Join-Path $Root $newName)) {
       Ln ''
       Warn ('目标文件夹名已存在，保持原名：' + $oldName)
     } else {
       try {
-        Rename-Item $projDir $newName
+        Rename-Item -LiteralPath $projDir -NewName $newName -ErrorAction Stop
         $projDir = Join-Path $Root $newName
         $null = Set-BatPreferenceSafe 'LAST_PROJECT' $newName
         Ln ''
@@ -1558,6 +1672,7 @@ function Finish-Update($projDir) {
   } else {
     $null = Set-BatPreferenceSafe 'LAST_PROJECT' $oldName
   }
+  $null = Set-BatPreferenceSafe 'LAST_PROJECT' (Split-Path $projDir -Leaf)
   Remove-Item $ConfigFile -Force -ErrorAction SilentlyContinue
   Ln ''
   Separator
@@ -1632,10 +1747,9 @@ function Update($cfg, $projDir, $oldVer) {
   }
 
   Hint '更新会进行以下步骤：'
-  Hint '  · 停止当前服务'
-  Hint '  · 备份数据到 data-backup/'
-  Hint '  · 重建项目文件（保留 data / logs / node_modules / config.json）'
-  Hint '  · 重新安装依赖并构建'
+  Hint '  · 在临时目录检查源码、安装依赖并构建'
+  Hint '  · 新版本准备完成后停止当前服务并备份数据'
+  Hint '  · 替换项目文件，保留配置与运行数据；失败恢复旧文件'
   Ln ''
   Separator
   Ln ''
@@ -1643,7 +1757,6 @@ function Update($cfg, $projDir, $oldVer) {
   $ch = (Read-Host '  确认更新？Y=更新  N=切换版本  S=不再提示更新  其他=进入管理菜单').Trim()
   if ($ch -eq 'Y' -or $ch -eq 'y') {
     Ln ''
-    Stop-Service $projDir
 
     # ---- 智能快速更新检测：内容指纹一致且依赖未变 → 跳过备份/npm install/构建 ----
     $fast = $false
@@ -1672,16 +1785,16 @@ function Update($cfg, $projDir, $oldVer) {
         $oldHash = [string](Get-JsonValue $oldMarker 'payloadHash')
         $oldDeps = ''
         try { $oldDeps = Get-DepsKey (Join-Path $projDir 'package.json') } catch {}
-        if ($zipSha -ne $PayloadSha) { $fastReason = '源码内容已更新，走完整更新' }
+        if ($zipSha -ne $PayloadSha) { throw '安装包内容指纹不一致' }
         elseif ($oldHash -eq '') { $fastReason = '旧版本未记录内容指纹，首次需完整更新' }
         elseif ($oldHash -ne $zipSha) { $fastReason = '旧版本代码与此版本不同，走完整更新' }
         elseif ($zipDeps -eq '' -or $zipDeps -ne $oldDeps) { $fastReason = '依赖已变化，走完整更新' }
-        elseif (-not (Test-Path (Join-Path $projDir 'node_modules')) -or -not (Test-Path (Join-Path $projDir 'dist'))) { $fastReason = '依赖或构建产物缺失，走完整更新' }
+        elseif (-not (Test-Path -LiteralPath (Join-Path $projDir 'node_modules\.bin\vite.cmd')) -or -not (Test-Path -LiteralPath (Join-Path $projDir 'dist\index.html'))) { $fastReason = '依赖或构建产物缺失，走完整更新' }
         else { $fast = $true; $newHash = $zipSha }
       } catch {
         $fastReason = '更新内容检查失败（' + $_.Exception.Message + '），走完整更新'
       } finally {
-        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-InstallerWorkDirectory $tmp '.payload-check-'
       }
     }
 
@@ -1689,11 +1802,7 @@ function Update($cfg, $projDir, $oldVer) {
       Ln ''
       Info '内容指纹一致，执行快速更新（无需重新下载依赖与构建，秒完成）'
       Ln ''
-      Rebuild-Project $projDir
-      Ln ''
-      Progress '释放新版本项目文件...'
-      Write-Project $projDir $true
-      Write-VersionMarker $projDir $newHash
+      Invoke-ProjectUpdate $projDir $cfg $true $newHash
       Finish-Update $projDir
       return
     }
@@ -1702,16 +1811,7 @@ function Update($cfg, $projDir, $oldVer) {
       Hint ('快速更新不可用：' + $fastReason)
       Ln ''
     }
-    Backup-Data $projDir $cfg
-    Rebuild-Project $projDir
-    Ln ''
-    Progress '释放新版本项目文件...'
-    Write-Project $projDir $true
-    Ln ''
-    Invoke-NpmInstall $projDir $cfg
-    Ln ''
-    Invoke-NpmBuild $projDir
-    Write-VersionMarker $projDir $PayloadSha
+    Invoke-ProjectUpdate $projDir $cfg $false $PayloadSha
     Finish-Update $projDir
     return
   }

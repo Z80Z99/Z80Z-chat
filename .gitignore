@@ -5,6 +5,7 @@ node_modules/
 dist/
 frontend/dist/
 Z80Z-chat.bat
+*.tsbuildinfo
 
 # ── 运行时数据（含用户隐私：账号密码哈希/会话/消息/上传文件，切勿上传）──
 data/

@@ -14,6 +14,7 @@ const loading = ref(false)
 const error = ref('')
 
 async function handleSave() {
+  if (loading.value) return
   error.value = ''
   if (!name.value.trim()) {
     error.value = '频道名称不能为空'
@@ -34,6 +35,7 @@ async function handleSave() {
 }
 
 async function handleDelete() {
+  if (loading.value) return
   if (!window.confirm(`确定删除频道 #${props.channel.name}？频道内的消息将一并删除`)) return
   loading.value = true
   try {
@@ -59,11 +61,12 @@ async function handleDelete() {
       </div>
 
       <div class="space-y-4">
+        <p class="text-sm text-discord-200">{{ channel.type === 'announcement' ? '公告频道 · 管理成员发布' : channel.type === 'voice' ? '语音频道' : '文字频道' }} · 类型不可转换</p>
         <div>
           <label class="text-xs font-bold text-discord-200 uppercase tracking-wider">频道名称</label>
           <div class="flex items-center gap-2 mt-1">
-            <span class="text-discord-200">{{ channel.type === 'text' ? '#' : '🔊' }}</span>
-            <input v-model="name" class="input-discord flex-1" />
+            <span class="text-discord-200">{{ channel.type === 'text' ? '#' : channel.type === 'announcement' ? '公告' : '语音' }}</span>
+            <input v-model="name" class="input-discord flex-1 min-w-0" maxlength="50" aria-label="频道名称" />
           </div>
         </div>
 

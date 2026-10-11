@@ -7,9 +7,8 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
-import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import os from 'os'
+import { deflateRawSync } from 'node:zlib'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -18,33 +17,112 @@ const projectRoot = path.join(__dirname, '..')
 const TEMPLATE = path.join(projectRoot, 'deploy', 'install.template.bat')
 const OUTPUT = path.join(projectRoot, 'Z80Z-chat.bat')
 
-// 打包排除清单（相对项目根，目录按名前缀匹配）
+// 打包排除清单（目录按名称匹配，另排除配置与环境指定的运行目录）
 const EXCLUDE_DIRS = new Set([
   'node_modules', 'dist', 'data', 'logs', '.test-data', '.git',
   'nodejs', 'data-backup', '.deploy-test',
-  '.art-baseline', '.art-snapshots'
+  '.art-baseline', '.art-snapshots', '.agents', '.codex', '.aws',
+  'cloudflared', 'sakurafrp'
 ])
 const EXCLUDE_FILES = new Set([
-  'start.js',          // 单独内嵌到模板，不打包
   'start.bat',         // 单文件模式不需要旧启动器
-  'Z80Z-chat.bat',      // 构建产物自身
-  'package-lock.json', // 锁文件由引导层 npm install 时重新生成
-  '.install-version'   // 安装标记由引导层安装/更新时写入
+  'z80z-chat.bat',      // 构建产物自身（排除名称统一为小写）
+  '.install-version',  // 安装标记由引导层安装/更新时写入
+  '.install-config.json', '.npmrc', '.upload-secret', 'npm-install.log'
 ])
 // deploy/ 内排除模板自身（保留 z80z-chat.service 等）
 const EXCLUDE_DEPLOY = new Set(['install.template.bat'])
 
-function collectFiles(dir, rel = '') {
+export function parseReleaseConfig(source) {
+  let clean = '', inString = false, lineComment = false, blockComment = false
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index], next = source[index + 1]
+    if (lineComment) {
+      if (character === '\n') { lineComment = false; clean += character }
+      continue
+    }
+    if (blockComment) {
+      if (character === '*' && next === '/') { blockComment = false; index++ }
+      continue
+    }
+    if (inString) {
+      clean += character
+      if (character === '\\') { clean += next || ''; index++ }
+      else if (character === '"') inString = false
+      continue
+    }
+    if (character === '"') { inString = true; clean += character; continue }
+    if (character === '/' && next === '/') { lineComment = true; index++; continue }
+    if (character === '/' && next === '*') { blockComment = true; index++; continue }
+    clean += character
+  }
+  try {
+    const config = JSON.parse(clean.replace(/^\uFEFF/, ''))
+    if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error()
+    return config
+  } catch { throw new Error('发布配置 config.json 无效，请检查 JSON 和注释格式') }
+}
+
+// 共享 OpenRelay 的公开默认账号可分发；部署者的签名密钥和 TURN 账号不可分发。
+export function assertSafeReleaseConfig(source) {
+  const config = parseReleaseConfig(source)
+  const hasValue = value => value != null && (typeof value !== 'string' || value.trim() !== '')
+  if (hasValue(config.uploadSecret)) throw new Error('发布配置含私有 uploadSecret，请使用未填写密钥的发布配置')
+  for (const server of Array.isArray(config.iceServers) ? config.iceServers : []) {
+    if (!server || (!hasValue(server.username) && !hasValue(server.credential))) continue
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+    const publicDefault = urls.length > 0 && urls.every(url => typeof url === 'string' && /^turn:openrelay\.metered\.ca:(?:80|443)(?:\?transport=tcp)?$/.test(url))
+      && server.username === 'openrelayproject' && server.credential === 'openrelayproject'
+    if (!publicDefault) throw new Error('发布配置含私有 ICE 账号或凭据，请使用公开默认配置')
+  }
+  return config
+}
+
+export function collectFiles(dir, rel = '', environment = process.env) {
+  const root = path.resolve(dir)
+  const configPath = path.join(root, 'config.json')
+  const config = fs.existsSync(configPath) ? parseReleaseConfig(fs.readFileSync(configPath, 'utf8')) : {}
+  const runtimePaths = new Set()
+  const pathKey = value => process.platform === 'win32' ? value.toLowerCase() : value
+  function excludeRuntimePath(value, base = root) {
+    if (typeof value !== 'string' || value.trim() === '') return
+    const absolute = path.resolve(base, value)
+    const relative = path.relative(root, absolute)
+    if (relative === '') throw new Error('运行数据目录不能是项目根目录，无法安全打包')
+    if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) return
+    runtimePaths.add(pathKey(absolute))
+    if (fs.existsSync(absolute)) {
+      const real = fs.realpathSync(absolute)
+      const realRelative = path.relative(root, real)
+      if (realRelative === '') throw new Error('运行数据目录不能指向项目根目录，无法安全打包')
+      if (realRelative !== '..' && !realRelative.startsWith('..' + path.sep) && !path.isAbsolute(realRelative)) runtimePaths.add(pathKey(real))
+    }
+  }
+  excludeRuntimePath(config.dataDir)
+  excludeRuntimePath(environment.DATA_DIR)
+  excludeRuntimePath(environment.LOG_DIR)
+  // logger 的相对 LOG_DIR 按工作目录解析；也排除项目内同名路径中的历史日志。
+  excludeRuntimePath(environment.LOG_DIR, process.cwd())
+  return collectProjectFiles(root, rel, runtimePaths, pathKey)
+}
+
+function collectProjectFiles(dir, rel, runtimePaths, pathKey) {
   const files = []
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const relPath = rel ? rel + '/' + entry.name : entry.name
     const full = path.join(dir, entry.name)
+    const exclusionName = entry.name.toLowerCase()
+    if (runtimePaths.has(pathKey(full))) continue
+    if (entry.isSymbolicLink()) continue
+    if (/^\.(?:update-stage-|project-rollback-|payload-check-|project-files-|npm-out-|config\.)/.test(exclusionName)) continue
     if (entry.isDirectory()) {
-      if (EXCLUDE_DIRS.has(entry.name)) continue
-      files.push(...collectFiles(full, relPath))
+      if (EXCLUDE_DIRS.has(exclusionName)) continue
+      files.push(...collectProjectFiles(full, relPath, runtimePaths, pathKey))
     } else {
-      if (EXCLUDE_FILES.has(entry.name)) continue
-      if (rel === 'deploy' && EXCLUDE_DEPLOY.has(entry.name)) continue
+      if (EXCLUDE_FILES.has(exclusionName)) continue
+      if (exclusionName === '.env' || exclusionName.startsWith('.env.')) continue
+      if (exclusionName.endsWith('.tsbuildinfo')) continue
+      if (rel.toLowerCase() === 'deploy' && EXCLUDE_DEPLOY.has(exclusionName)) continue
       files.push({ relPath, full })
     }
   }
@@ -68,8 +146,8 @@ function crc32(buf) {
   return (c ^ 0xffffffff) >>> 0
 }
 
-// ---------- 手写 stored zip（无压缩，跨平台兜底） ----------
-function buildStoredZip(entries) {
+// ---------- ZIP deflate：同一份内存快照同时用于压缩和内容指纹 ----------
+export function buildProjectZip(entries) {
   const chunks = []
   const central = []
   let offset = 0
@@ -77,21 +155,23 @@ function buildStoredZip(entries) {
     const nameBuf = Buffer.from(name, 'utf8')
     const crc = crc32(data) >>> 0
     const size = data.length
+    const compressed = deflateRawSync(data)
+    const compressedSize = compressed.length
     const lfh = Buffer.alloc(30)
     lfh.writeUInt32LE(0x04034b50, 0)
     lfh.writeUInt16LE(20, 4)
-    lfh.writeUInt16LE(0, 6)
-    lfh.writeUInt16LE(0, 8)          // method: stored
+    lfh.writeUInt16LE(0x0800, 6)     // UTF-8 filenames
+    lfh.writeUInt16LE(8, 8)          // method: deflate
     lfh.writeUInt16LE(0, 10)
     lfh.writeUInt16LE(0x21, 12)
     lfh.writeUInt32LE(crc, 14)
-    lfh.writeUInt32LE(size, 18)
+    lfh.writeUInt32LE(compressedSize, 18)
     lfh.writeUInt32LE(size, 22)
     lfh.writeUInt16LE(nameBuf.length, 26)
     lfh.writeUInt16LE(0, 28)
-    chunks.push(lfh, nameBuf, data)
-    central.push({ nameBuf, crc, size, offset })
-    offset += 30 + nameBuf.length + size
+    chunks.push(lfh, nameBuf, compressed)
+    central.push({ nameBuf, crc, size, compressedSize, offset })
+    offset += 30 + nameBuf.length + compressedSize
   }
   const cdStart = offset
   const cdChunks = []
@@ -100,11 +180,11 @@ function buildStoredZip(entries) {
     cd.writeUInt32LE(0x02014b50, 0)
     cd.writeUInt16LE(20, 4)
     cd.writeUInt16LE(20, 6)
-    cd.writeUInt16LE(0, 8)
-    cd.writeUInt16LE(0, 10)
+    cd.writeUInt16LE(0x0800, 8)
+    cd.writeUInt16LE(8, 10)
     cd.writeUInt16LE(0x21, 12)
     cd.writeUInt32LE(c.crc, 16)
-    cd.writeUInt32LE(c.size, 20)
+    cd.writeUInt32LE(c.compressedSize, 20)
     cd.writeUInt32LE(c.size, 24)
     cd.writeUInt16LE(c.nameBuf.length, 28)
     cd.writeUInt16LE(0, 30)
@@ -128,43 +208,10 @@ function buildStoredZip(entries) {
   return Buffer.concat([...chunks, ...cdChunks, eocd])
 }
 
-// ---------- 生成项目 zip ----------
-function buildProjectZip() {
-  const files = collectFiles(projectRoot)
-  const entries = files.map(f => ({
-    name: f.relPath,
-    data: fs.readFileSync(f.full)
-  }))
-
-  // Windows 优先用系统 Compress-Archive（体积小），失败回退手写 stored zip
-  if (os.platform() === 'win32') {
-    try {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'z80z-chat-pack-'))
-      for (const e of entries) {
-        const dest = path.join(tmp, e.name)
-        fs.mkdirSync(path.dirname(dest), { recursive: true })
-        fs.writeFileSync(dest, e.data)
-      }
-      const zipPath = path.join(tmp, 'project.zip')
-      const script = `Compress-Archive -Path '${tmp}\\*' -DestinationPath '${zipPath}' -CompressionLevel Optimal -Force`
-      execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${script.replace(/"/g, '\\"')}"`, { stdio: 'ignore' })
-      const zipBuf = fs.readFileSync(zipPath)
-      fs.rmSync(tmp, { recursive: true, force: true })
-      console.log(`  ✔ 项目已打包 (Compress-Archive, ${(zipBuf.length / 1024).toFixed(1)} KB)`)
-      return zipBuf
-    } catch {
-      console.log('  ℹ Compress-Archive 不可用，改用内置打包')
-    }
-  }
-  const zipBuf = buildStoredZip(entries)
-  console.log(`  ✔ 项目已打包 (内置 stored zip, ${(zipBuf.length / 1024).toFixed(1)} KB)`)
-  return zipBuf
-}
-
 // ---------- content fingerprint for smart updates ----------
 // 与引导层 Compute-PayloadSha 一致：剔除 package.json，按相对路径排序，
 // 逐文件 sha256 → 整体 sha256（文件内容变化才变化，与 zip 格式/时间戳无关）
-function computePayloadSha(entries) {
+export function computePayloadSha(entries) {
   const sorted = entries
     .filter(e => e.name !== 'package.json')
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
@@ -179,7 +226,11 @@ function computePayloadSha(entries) {
 
 // ---------- 主流程 ----------
 function main() {
-  const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
+  const payloadEntries = collectFiles(projectRoot).map(f => ({ name: f.relPath, data: fs.readFileSync(f.full) }))
+  const releaseConfig = payloadEntries.find(entry => entry.name === 'config.json')
+  if (!releaseConfig) throw new Error('发布配置 config.json 缺失')
+  assertSafeReleaseConfig(releaseConfig.data.toString('utf8'))
+  const pkg = JSON.parse(payloadEntries.find(entry => entry.name === 'package.json').data.toString('utf8'))
   const version = pkg.version || '0.0.0'
 
   if (!fs.existsSync(TEMPLATE)) {
@@ -198,9 +249,8 @@ function main() {
   console.log('')
 
   // 1. 打包项目源码
-  const zipBuf = buildProjectZip()
-  // 内容指纹（与 zip 打包方式无关，供引导层智能更新比对）
-  const payloadEntries = collectFiles(projectRoot).map(f => ({ name: f.relPath, data: fs.readFileSync(f.full) }))
+  const zipBuf = buildProjectZip(payloadEntries)
+  console.log(`  ✔ 项目已打包 (ZIP deflate, ${(zipBuf.length / 1024).toFixed(1)} KB)`)
   const payloadSha = computePayloadSha(payloadEntries)
   console.log(`  ✔ 内容指纹 (PAYLOAD_SHA): ${payloadSha}`)
 
@@ -211,7 +261,7 @@ function main() {
   console.log(`  ✔ base64 编码完成 (${b64Lines.length} 行)`)
 
   // 3. 读取 start.js
-  const startJs = fs.readFileSync(startJsPath, 'utf8')
+  const startJs = payloadEntries.find(entry => entry.name === 'start.js').data.toString('utf8')
   // start.js 以 base64 内嵌（与 PS/zip 块一致）：bat 明文不再包含可被
   // 安全软件静态特征扫描命中的代码（如 Stop-Process / 托盘 / 隐藏窗口等）
   const startJsB64 = Buffer.from(startJs, 'utf8').toString('base64')
@@ -275,4 +325,4 @@ function main() {
   console.log('')
 }
 
-main()
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) main()
